@@ -191,8 +191,8 @@ fn floor64(w: f32) -> f32 {
     (w * 64.0).floor() / 64.0
 }
 
-fn fits(width: f32, avail: f32, at_space: bool) -> bool {
-    ceil64(width) <= avail + if at_space { 1.0 / 64.0 } else { 0.0 }
+fn fits(width: f32, avail: f32) -> bool {
+    ceil64(width) <= avail + 1.0 / 64.0
 }
 
 struct G {
@@ -676,7 +676,6 @@ impl<'a> Para<'a> {
         }
         opps.sort_unstable();
         opps.dedup();
-        let at_space = |ls: usize, le: usize| self.trail(ls, le) < le;
         let mut ls = hs;
         while ls < he {
             let first = opps.partition_point(|&o| o <= ls);
@@ -684,11 +683,7 @@ impl<'a> Para<'a> {
             let count = opps.len() - first + 1;
             let mut best = None;
             for k in 0..count {
-                if fits(
-                    self.fit_width(ls, cand(k), false),
-                    self.avail,
-                    at_space(ls, cand(k)),
-                ) {
+                if fits(self.fit_width(ls, cand(k), false), self.avail) {
                     best = Some(k);
                 } else {
                     break;
@@ -698,7 +693,7 @@ impl<'a> Para<'a> {
             if let Some(mut k) = best {
                 loop {
                     let le = cand(k);
-                    if fits(self.fit_width(ls, le, true), self.avail, at_space(ls, le)) {
+                    if fits(self.fit_width(ls, le, true), self.avail) {
                         chosen = Some(le);
                         break;
                     }
@@ -722,7 +717,7 @@ impl<'a> Para<'a> {
                         }
                     }
                     loop {
-                        if fits(self.fit_width(ls, g, true), self.avail, false) || g <= ls + 1 {
+                        if fits(self.fit_width(ls, g, true), self.avail) || g <= ls + 1 {
                             break g;
                         }
                         g -= 1;

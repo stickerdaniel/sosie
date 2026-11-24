@@ -1063,3 +1063,12 @@ fn a_normal_space_may_break_before_break_spaces_whitespace() {
         t.lines.iter().map(|l| l.advance).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn the_last_line_may_end_a_sixty_fourth_past_the_width() {
+    use WhiteSpace::{Normal as N, PreWrap as W};
+    assert_mono(&[
+        (&[(N, "aa bb cc dd")], 30.0, 160.0, Some((24.0, 122.0))),
+        (&[(W, "aa bb cc dd")], 30.0, 160.0, Some((24.0, 122.0))),
+    ]);
+}

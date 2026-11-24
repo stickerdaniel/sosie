@@ -1,5 +1,6 @@
 use sosie_core::{
-    rasterize, DisplayList, Fonts, Item, LimitError, Limits, Radii, Rect, RenderError, Rgba, Shape,
+    rasterize, DisplayList, Fonts, GlyphPos, Item, LimitError, Limits, Radii, Rect, RenderError,
+    Rgba, Shape,
 };
 
 fn render(width: f32, height: f32, dpr: f32, background: Rgba) -> Result<(u32, u32), RenderError> {
@@ -112,4 +113,29 @@ fn a_fill_far_larger_than_the_canvas_covers_it() {
         .0
         .iter()
         .all(|p| *p == [0x09, 0x69, 0xda, 0xff]));
+}
+
+#[test]
+fn glyphs_far_outside_the_canvas_are_skipped() {
+    let fonts = Fonts::new();
+    for (x, baseline, gx, id) in [
+        (1.0e20, 14.0, 0.0, 36),
+        (0.0, 1.0e20, 0.0, 74),
+        (-1.0e20, 14.0, 0.0, 77),
+        (0.0, 14.0, 1.0e20, 36),
+    ] {
+        let mut list = DisplayList::new(16.0, 16.0, Rgba::WHITE);
+        list.push(Item::Glyphs {
+            face: 0,
+            size: 16.0,
+            color: Rgba::hex(0x1f2328),
+            x,
+            baseline,
+            glyphs: vec![GlyphPos { id, x: gx, y: 0.0 }],
+        });
+        let px = rasterize(&fonts, &list, 1.0, &Limits::default())
+            .unwrap_or_else(|e| panic!("{e}"))
+            .rgba;
+        assert!(px.iter().all(|&v| v == 255), "{x} {baseline} {gx}");
+    }
 }

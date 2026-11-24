@@ -237,7 +237,7 @@ impl Renderer<'_> {
             return;
         }
         if let Some(cov) = coverage::mask_small(path, w, h, rule, left, top) {
-            self.blit(&cov, w, h, left as i32, top as i32, color, None);
+            self.blit(&cov, w, h, left as i64, top as i64, color, None);
         }
     }
 
@@ -270,7 +270,7 @@ impl Renderer<'_> {
                 if let Some(s) =
                     emoji::sprite(f, g.id, size_dev, base_x + g.x * d, base_y + g.y * d)
                 {
-                    self.blit_premul(&s.data, s.w, s.h, s.left, s.top);
+                    self.blit_premul(&s.data, s.w, s.h, s.left as i64, s.top as i64);
                 }
             }
             return;
@@ -289,8 +289,8 @@ impl Renderer<'_> {
             let Some(b) = glyph::bitmap(f, g.id, size_dev, xq) else {
                 continue;
             };
-            let left = xq.floor() as i32 + b.left;
-            let top = yq as i32 + b.top;
+            let left = (xq.floor() as i64).saturating_add(b.left as i64);
+            let top = (yq as i64).saturating_add(b.top as i64);
             self.blit(&b.data, b.w, b.h, left, top, color, Some(lut));
         }
     }
@@ -301,23 +301,18 @@ impl Renderer<'_> {
         cov: &[u8],
         w: u32,
         h: u32,
-        left: i32,
-        top: i32,
+        left: i64,
+        top: i64,
         c: Rgba,
         lut: Option<&[u8; 256]>,
     ) {
-        let (pw, ph) = (self.pm.width as i32, self.pm.height as i32);
-        for y in 0..h as i32 {
+        let pw = self.pm.width as i64;
+        let (xs, ys) = (visible(left, w, pw), visible(top, h, self.pm.height as i64));
+        for y in ys {
             let py = top + y;
-            if py < 0 || py >= ph {
-                continue;
-            }
-            for x in 0..w as i32 {
+            for x in xs.clone() {
                 let px = left + x;
-                if px < 0 || px >= pw {
-                    continue;
-                }
-                let raw = cov[(y as u32 * w + x as u32) as usize];
+                let raw = cov[(y * w as i64 + x) as usize];
                 let cv = lut.map_or(raw, |t| t[raw as usize]) as u32;
                 let a = (c.a as u32 * cv + 127) / 255;
                 if a == 0 {
@@ -333,19 +328,14 @@ impl Renderer<'_> {
         }
     }
 
-    fn blit_premul(&mut self, src: &[u8], w: u32, h: u32, left: i32, top: i32) {
-        let (pw, ph) = (self.pm.width as i32, self.pm.height as i32);
-        for y in 0..h as i32 {
+    fn blit_premul(&mut self, src: &[u8], w: u32, h: u32, left: i64, top: i64) {
+        let pw = self.pm.width as i64;
+        let (xs, ys) = (visible(left, w, pw), visible(top, h, self.pm.height as i64));
+        for y in ys {
             let py = top + y;
-            if py < 0 || py >= ph {
-                continue;
-            }
-            for x in 0..w as i32 {
+            for x in xs.clone() {
                 let px = left + x;
-                if px < 0 || px >= pw {
-                    continue;
-                }
-                let s = ((y as u32 * w + x as u32) * 4) as usize;
+                let s = ((y * w as i64 + x) * 4) as usize;
                 let a = src[s + 3] as u32;
                 if a == 0 {
                     continue;
@@ -360,4 +350,10 @@ impl Renderer<'_> {
             }
         }
     }
+}
+
+fn visible(origin: i64, len: u32, extent: i64) -> std::ops::Range<i64> {
+    let start = origin.saturating_neg().clamp(0, len as i64);
+    let end = extent.saturating_sub(origin).clamp(0, len as i64);
+    start..end.max(start)
 }

@@ -33,7 +33,7 @@ const CACHE_BYTES: usize = 64 << 20;
 
 #[derive(Default)]
 struct StrikeCache {
-    map: HashMap<(u16, u32), Option<Arc<Strike>>>,
+    map: HashMap<(u16, u32), Arc<Strike>>,
     bytes: usize,
 }
 
@@ -50,12 +50,10 @@ fn strike(face: &Face, glyph: u32, size_dev: f32) -> Option<Arc<Strike>> {
         .map
         .get(&key)
     {
-        return s.clone();
+        return Some(s.clone());
     }
-    let decoded = decode(face, glyph, size_dev).map(Arc::new);
-    let bytes = decoded
-        .as_ref()
-        .map_or(0, |s| 2 * s.w as usize * s.h as usize * 16);
+    let decoded = Arc::new(decode(face, glyph, size_dev)?);
+    let bytes = 2 * decoded.w as usize * decoded.h as usize * 16;
     let mut cache = strikes().lock().unwrap_or_else(|e| e.into_inner());
     if cache.bytes + bytes > CACHE_BYTES {
         cache.map.clear();
@@ -63,7 +61,7 @@ fn strike(face: &Face, glyph: u32, size_dev: f32) -> Option<Arc<Strike>> {
     }
     cache.bytes += bytes;
     cache.map.insert(key, decoded.clone());
-    decoded
+    Some(decoded)
 }
 
 fn decode(face: &Face, glyph: u32, size_dev: f32) -> Option<Strike> {
@@ -201,4 +199,33 @@ pub(crate) fn sprite(face: &Face, glyph: u32, size_dev: f32, x: f32, y: f32) -> 
         top: top as i32,
         data,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Fonts, Pack};
+
+    #[test]
+    fn a_missing_emoji_glyph_leaves_no_cache_entry() {
+        let mut fonts = Fonts::new();
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NotoColorEmoji.ttf"
+        ))
+        .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(fonts.register(bytes), Ok(Pack::Emoji));
+        let face = (0..10)
+            .filter_map(|id| fonts.face(id))
+            .find(|f| f.is_emoji())
+            .unwrap_or_else(|| panic!("emoji face not loaded"));
+        let missing = 1_000_000..1_004_096u32;
+        for glyph in missing.clone() {
+            assert!(sprite(face, glyph, 32.0, 0.0, 0.0).is_none());
+        }
+        let cache = strikes().lock().unwrap_or_else(|e| e.into_inner());
+        assert!(missing
+            .into_iter()
+            .all(|g| !cache.map.contains_key(&(face.id, g))));
+    }
 }

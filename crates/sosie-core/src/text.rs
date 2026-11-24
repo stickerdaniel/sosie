@@ -670,11 +670,12 @@ impl<'a> Para<'a> {
                 opps.push(k);
             }
         }
-        opps.retain(|&k| {
+        let wraps = |k: usize| {
             let (p, q) = (&self.g[k - 1], &self.g[k]);
             self.styles[p.span].ws != WhiteSpace::Pre
                 || (self.wrap && p.span != q.span && !p.space && !p.tab)
-        });
+        };
+        opps.retain(|&k| wraps(k));
         opps.sort_unstable();
         opps.dedup();
         let mut ls = hs;
@@ -718,8 +719,13 @@ impl<'a> Para<'a> {
                         }
                     }
                     loop {
-                        if fits(self.fit_width(ls, g, true), self.avail) || g <= ls + 1 {
+                        let allowed = g == he || wraps(g);
+                        if allowed && (fits(self.fit_width(ls, g, true), self.avail) || g <= ls + 1)
+                        {
                             break g;
+                        }
+                        if g <= ls + 1 {
+                            break (ls + 1..he).find(|&k| wraps(k)).unwrap_or(he);
                         }
                         g -= 1;
                     }

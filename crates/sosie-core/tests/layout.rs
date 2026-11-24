@@ -955,6 +955,15 @@ fn mono_layout(
     parts: &[(WhiteSpace, &str)],
     width: f32,
 ) -> (TextLayout, Option<(f32, f32)>) {
+    mono_wrapped(fonts, parts, width, OverflowWrap::Normal)
+}
+
+fn mono_wrapped(
+    fonts: &Fonts,
+    parts: &[(WhiteSpace, &str)],
+    width: f32,
+    overflow_wrap: OverflowWrap,
+) -> (TextLayout, Option<(f32, f32)>) {
     let mono = |white_space| TextStyle {
         family: FamilyList::parse(MONO),
         size: 10.0,
@@ -965,7 +974,7 @@ fn mono_layout(
     let p = Paragraph {
         width,
         strut: mono(WhiteSpace::BreakSpaces),
-        overflow_wrap: OverflowWrap::Normal,
+        overflow_wrap,
         direction: Direction::Ltr,
     };
     let inlines: Vec<Inline> = parts
@@ -1170,6 +1179,37 @@ fn a_break_between_spans_follows_the_span_before_it_or_the_strut() {
         assert_eq!(
             t.height, height,
             "{first:?} then {second:?} in {strut:?}: height"
+        );
+    }
+}
+
+#[test]
+fn overflow_wrap_anywhere_does_not_break_inside_pre() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P};
+    let fonts = all_fonts();
+    let cases: [MonoCase; 5] = [
+        (
+            &[(P, "a\t"), (P, "\tb")],
+            7.0,
+            80.0,
+            Some((18.015625, 42.0)),
+        ),
+        (
+            &[(B, "a\t"), (P, "\tb")],
+            7.0,
+            240.0,
+            Some((6.015625, 202.0)),
+        ),
+        (&[(P, "abcdef")], 13.0, 80.0, Some((30.0, 42.0))),
+        (&[(P, "abc"), (N, "def")], 13.0, 240.0, Some((0.0, 202.0))),
+        (&[(N, "abc"), (P, "def")], 13.0, 240.0, Some((12.0, 202.0))),
+    ];
+    for (parts, width, height, last) in cases {
+        let (t, got) = mono_wrapped(&fonts, parts, width, OverflowWrap::Anywhere);
+        assert_eq!(t.height, height, "{parts:?}: height");
+        assert!(
+            matches!((got, last), (Some(g), Some(c)) if (g.0 - c.0).abs() <= 1.0 / 64.0 && g.1 == c.1),
+            "{parts:?}: last glyph at {got:?}, Chromium {last:?}"
         );
     }
 }

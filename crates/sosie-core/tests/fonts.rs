@@ -49,7 +49,8 @@ fn faces(fonts: &Fonts, text: &str, style: TextStyle) -> Vec<&'static str> {
             text: text.to_string(),
             style,
         }],
-    );
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
     let mut list = DisplayList::new(400.0, 100.0, hex("#ffffff"));
     t.paint(&mut list, 0.0, 0.0);
     let mut out: Vec<&'static str> = list

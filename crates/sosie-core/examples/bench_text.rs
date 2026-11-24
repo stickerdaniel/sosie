@@ -89,7 +89,7 @@ fn main() {
     let fonts = Fonts::new();
     let fonts_new = t0.elapsed();
     let t1 = Instant::now();
-    let t = layout(&fonts, &para, &inlines);
+    let t = layout(&fonts, &para, &inlines).unwrap_or_else(|e| panic!("{e}"));
     let png = rasterize(&fonts, &list(&t), DPR, &limits)
         .map(|p| encode_png(&p))
         .unwrap_or_default();
@@ -97,7 +97,7 @@ fn main() {
     let (mut lay, mut ras, mut enc, mut all) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for _ in 0..RUNS {
         let a = Instant::now();
-        let t = layout(&fonts, &para, &inlines);
+        let t = layout(&fonts, &para, &inlines).unwrap_or_else(|e| panic!("{e}"));
         let b = Instant::now();
         let pm = rasterize(&fonts, &list(&t), DPR, &limits).unwrap_or_else(|e| panic!("{e}"));
         let c = Instant::now();

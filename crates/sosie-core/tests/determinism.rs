@@ -40,7 +40,7 @@ fn render(fonts: &Fonts, text: &str, direction: Direction) -> Vec<u8> {
             style: bold,
         },
     ];
-    let t = layout(fonts, &para, &inlines);
+    let t = layout(fonts, &para, &inlines).unwrap_or_else(|e| panic!("{e}"));
     let mut list = DisplayList::new(800.0, (t.height + 16.0).ceil(), hex("#ffffff"));
     t.paint(&mut list, 8.0, 8.0);
     rasterize_png(fonts, &list, 2.0, &Default::default()).expect("render")

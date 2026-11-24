@@ -328,7 +328,7 @@ impl<'a> Para<'a> {
             let st = &styles[span];
             let space = c == " ";
             let tab = c == "\t";
-            let nl = c == "\n";
+            let nl = c == "\n" || c == "\r\n";
             let atom = st.atom.is_some();
             let hang = match st.ws {
                 WhiteSpace::Normal => space,
@@ -361,9 +361,16 @@ impl<'a> Para<'a> {
         let mut shape_break = vec![false; n];
         for i in 1..n {
             let (p, q) = (&g[i - 1], &g[i]);
-            item_break[i] =
-                p.span != q.span || p.level != q.level || p.tab || q.tab || p.nl || q.nl;
-            shape_break[i] = item_break[i] || p.face != q.face || p.script != q.script;
+            let hard = p.level != q.level || p.tab || q.tab || p.nl || q.nl;
+            item_break[i] = hard || p.span != q.span;
+            shape_break[i] = hard
+                || p.atom
+                || q.atom
+                || p.face != q.face
+                || p.script != q.script
+                || p.pad_after > 0.0
+                || q.pad_before > 0.0
+                || styles[p.span].size != styles[q.span].size;
         }
         let strut_style = resolve(fonts, &para.strut);
         let strut = half_leading(
@@ -528,6 +535,9 @@ impl<'a> Para<'a> {
     fn tab_advance(&self, span: usize, x: f32) -> f32 {
         let sw = self.space_width(span);
         let tw = sw * self.styles[span].tab as f32;
+        if !(tw > 0.0 && tw.is_finite() && x.is_finite()) {
+            return 0.0;
+        }
         let mut d = tw - x.rem_euclid(tw);
         if d < sw / 2.0 {
             d += tw;
@@ -608,11 +618,14 @@ impl<'a> Para<'a> {
             return out;
         }
         let mut hs = 0;
-        for k in 0..=n {
-            if k == n || self.g[k].nl {
+        for k in 0..n {
+            if self.g[k].nl {
                 self.break_hard(hs, k, &mut out);
                 hs = k + 1;
             }
+        }
+        if hs < n {
+            self.break_hard(hs, n, &mut out);
         }
         out
     }
@@ -639,8 +652,12 @@ impl<'a> Para<'a> {
             .collect();
         for k in hs + 1..he {
             let (p, q) = (&self.g[k - 1], &self.g[k]);
-            let ws = self.styles[p.span].ws;
-            if matches!(ws, WhiteSpace::BreakSpaces | WhiteSpace::PreWrap) && p.space && !q.space {
+            let after_space = match self.styles[p.span].ws {
+                WhiteSpace::BreakSpaces => p.space,
+                WhiteSpace::PreWrap => p.space && !q.space,
+                _ => false,
+            };
+            if after_space {
                 opps.push(k);
             }
         }
@@ -763,23 +780,42 @@ impl<'a> Para<'a> {
                 continue;
             }
             self.shape_into(a, b, &mut glyphs);
-            let start = (a..b).map(|k| vpos[k - ls].0).fold(f32::INFINITY, f32::min);
-            let mut x = shift + start;
-            let mut out = Vec::with_capacity(glyphs.len());
-            for gl in &glyphs {
-                out.push(GlyphPos {
-                    id: gl.id,
-                    x: x + gl.dx,
-                    y: -gl.dy,
+            let origin = first.start;
+            let grapheme = |cluster: u32| {
+                let at = origin + cluster as usize;
+                a + self.g[a..b].partition_point(|g| g.start <= at).max(1) - 1
+            };
+            let mut i = 0;
+            while i < glyphs.len() {
+                let span = self.g[grapheme(glyphs[i].cluster)].span;
+                let mut j = i;
+                let mut start = f32::INFINITY;
+                while j < glyphs.len() {
+                    let k = grapheme(glyphs[j].cluster);
+                    if self.g[k].span != span {
+                        break;
+                    }
+                    start = start.min(vpos[k - ls].0);
+                    j += 1;
+                }
+                let mut x = shift + start;
+                let mut out = Vec::with_capacity(j - i);
+                for gl in &glyphs[i..j] {
+                    out.push(GlyphPos {
+                        id: gl.id,
+                        x: x + gl.dx,
+                        y: -gl.dy,
+                    });
+                    x += gl.adv;
+                }
+                runs.push(Run {
+                    face: first.face,
+                    size: st.size,
+                    color: self.styles[span].color,
+                    glyphs: out,
                 });
-                x += gl.adv;
+                i = j;
             }
-            runs.push(Run {
-                face: first.face,
-                size: st.size,
-                color: st.color,
-                glyphs: out,
-            });
         }
         let mut backgrounds = Vec::new();
         let mut k = ls;
@@ -893,7 +929,49 @@ fn visual_order(levels: &[u8]) -> Vec<usize> {
     order
 }
 
-pub fn layout(fonts: &Fonts, para: &Paragraph, inlines: &[Inline]) -> TextLayout {
+pub const MIN_FONT_SIZE: f32 = 0.0;
+pub const MAX_FONT_SIZE: f32 = 256.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LayoutError {
+    FontSize { size: f32, min: f32, max: f32 },
+}
+
+impl std::fmt::Display for LayoutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LayoutError::FontSize { size, min, max } => {
+                write!(f, "font size {size} px is outside {min} to {max} px")
+            }
+        }
+    }
+}
+
+impl std::error::Error for LayoutError {}
+
+fn check_size(size: f32) -> Result<(), LayoutError> {
+    if (MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&size) {
+        Ok(())
+    } else {
+        Err(LayoutError::FontSize {
+            size,
+            min: MIN_FONT_SIZE,
+            max: MAX_FONT_SIZE,
+        })
+    }
+}
+
+pub fn layout(
+    fonts: &Fonts,
+    para: &Paragraph,
+    inlines: &[Inline],
+) -> Result<TextLayout, LayoutError> {
+    check_size(para.strut.size)?;
+    for inline in inlines {
+        if let Inline::Text { style, .. } = inline {
+            check_size(style.size)?;
+        }
+    }
     let p = Para::new(fonts, para, inlines);
     let mut lines = Vec::new();
     let mut top = 0.0f32;
@@ -909,7 +987,7 @@ pub fn layout(fonts: &Fonts, para: &Paragraph, inlines: &[Inline]) -> TextLayout
             && face.weight() < 600
             && !face.is_emoji()
     });
-    TextLayout {
+    Ok(TextLayout {
         text: p.text,
         lines,
         height: top,
@@ -917,5 +995,5 @@ pub fn layout(fonts: &Fonts, para: &Paragraph, inlines: &[Inline]) -> TextLayout
             .then_some(Warning::SyntheticBoldUnsupported)
             .into_iter()
             .collect(),
-    }
+    })
 }

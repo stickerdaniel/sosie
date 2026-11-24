@@ -181,7 +181,7 @@ pub fn inlines(l: &LayoutIn, fg: Rgba, code: Rgba) -> (Paragraph, Vec<Inline>) {
 
 pub fn lay_out(fonts: &Fonts, l: &LayoutIn) -> TextLayout {
     let (para, spans) = inlines(l, hex("#000000"), hex("#eeeeee"));
-    layout(fonts, &para, &spans)
+    layout(fonts, &para, &spans).unwrap_or_else(|e| panic!("{e}"))
 }
 
 #[derive(Deserialize, Clone)]
@@ -227,7 +227,9 @@ pub fn case_height(fonts: &Fonts, c: &PaintCase) -> f32 {
         _ => {
             let t = theme(&c.theme);
             let (para, spans) = inlines(&layout_in(c), t.fg, t.code);
-            let text = layout(fonts, &para, &spans).height;
+            let text = layout(fonts, &para, &spans)
+                .unwrap_or_else(|e| panic!("{e}"))
+                .height;
             let pad = if c.block == "pre" { PRE_PADDING } else { 0.0 };
             (text + 2.0 * pad + 2.0 * CASE_PADDING).ceil()
         }
@@ -274,7 +276,7 @@ pub fn paint_case(fonts: &Fonts, c: &PaintCase, width: f32, height: f32) -> Disp
         return list;
     }
     let (para, spans) = inlines(&layout_in(c), t.fg, t.code);
-    let text = layout(fonts, &para, &spans);
+    let text = layout(fonts, &para, &spans).unwrap_or_else(|e| panic!("{e}"));
     let pre = c.block == "pre";
     if pre {
         list.push(Item::Fill {
@@ -342,7 +344,8 @@ pub fn diff_ratio(a: &[u8], e: &[u8], w: u32, h: u32, tol: u8, slack: i32) -> (f
 }
 
 pub fn write_report(name: &str, value: &serde_json::Value) {
-    let dir = root().join("target/parity");
+    let tmp = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let dir = tmp.parent().unwrap_or(tmp).join("parity");
     std::fs::create_dir_all(&dir).expect("report dir");
     std::fs::write(
         dir.join(name),

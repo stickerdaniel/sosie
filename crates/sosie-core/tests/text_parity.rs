@@ -5,6 +5,7 @@ use serde_json::json;
 use std::collections::{BTreeMap, HashMap};
 
 const WIDTH_TOLERANCE: f32 = 4.0 / 64.0;
+const HEIGHT_TOLERANCE: f32 = 1.0 / 64.0;
 const REPORTED: [&str; 1] = ["cjk"];
 const SETS: [(&str, &str); 2] = [
     (
@@ -24,6 +25,8 @@ struct Stratum {
     break_mismatches: usize,
     width_mismatch_lines: usize,
     max_width_diff: f32,
+    height_mismatches: usize,
+    max_height_diff: f32,
     failing: Vec<String>,
 }
 
@@ -62,20 +65,31 @@ fn line_breaks_and_widths_match_chromium() {
             s.layouts += 1;
             let c = &chrome[&l.id];
             let ours = lay_out(&fonts, l);
-            let cl: Vec<String> = c.lines.iter().map(|x| trim(&l.block, &x.text)).collect();
-            let ol: Vec<String> = ours
+            let painted: Vec<_> = ours
                 .lines
+                .iter()
+                .filter(|x| !ours.line_text(x).is_empty())
+                .collect();
+            let cl: Vec<String> = c.lines.iter().map(|x| trim(&l.block, &x.text)).collect();
+            let ol: Vec<String> = painted
                 .iter()
                 .map(|x| trim(&l.block, ours.line_text(x)))
                 .collect();
             s.lines += cl.len();
+            let dh = (c.height - ours.height).abs();
+            s.max_height_diff = s.max_height_diff.max(dh);
+            if dh > HEIGHT_TOLERANCE {
+                s.height_mismatches += 1;
+                s.failing.push(key);
+                continue;
+            }
             if cl != ol {
                 s.break_mismatches += 1;
                 s.failing.push(key);
                 continue;
             }
             let mut bad = false;
-            for (cline, oline) in c.lines.iter().zip(&ours.lines) {
+            for (cline, oline) in c.lines.iter().zip(&painted) {
                 let d = (cline.w - oline.ink_width).abs();
                 s.max_width_diff = s.max_width_diff.max(d);
                 if d > WIDTH_TOLERANCE {
@@ -99,8 +113,14 @@ fn line_breaks_and_widths_match_chromium() {
     );
     for (k, s) in &strata {
         println!(
-            "{k:12} layouts {:5} lines {:6} breaks {:3} widths {:3} max {:.4}",
-            s.layouts, s.lines, s.break_mismatches, s.width_mismatch_lines, s.max_width_diff
+            "{k:12} layouts {:5} lines {:6} heights {:3} breaks {:3} widths {:3} max {:.4} max height {:.4}",
+            s.layouts,
+            s.lines,
+            s.height_mismatches,
+            s.break_mismatches,
+            s.width_mismatch_lines,
+            s.max_width_diff,
+            s.max_height_diff
         );
     }
     assert_eq!(
@@ -111,10 +131,13 @@ fn line_breaks_and_widths_match_chromium() {
     assert!(gated_layouts >= 2000, "only {gated_layouts} gated layouts");
     let failing: Vec<String> = gated
         .iter()
-        .filter(|(_, s)| s.break_mismatches > 0 || s.width_mismatch_lines > 0)
+        .filter(|(_, s)| {
+            s.height_mismatches > 0 || s.break_mismatches > 0 || s.width_mismatch_lines > 0
+        })
         .map(|(k, s)| {
             format!(
-                "{k}: {} break, {} width, first {:?}",
+                "{k}: {} height, {} break, {} width, first {:?}",
+                s.height_mismatches,
                 s.break_mismatches,
                 s.width_mismatch_lines,
                 s.failing.iter().take(5).collect::<Vec<_>>()

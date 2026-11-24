@@ -34,7 +34,14 @@ function capture(logs) {
   };
 }
 
-const HARNESS = ["tools/oracle/text-parity.mjs", "tools/oracle/lib.mjs", "tools/oracle/themes.mjs", "tools/oracle/capture.sh"];
+const HARNESS = [
+  "tools/oracle/text-parity.mjs",
+  "tools/oracle/lib.mjs",
+  "tools/oracle/themes.mjs",
+  "tools/oracle/capture.sh",
+  "tools/oracle/ref/Dockerfile",
+  "tools/oracle/ref/fonts.conf",
+];
 
 function describe() {
   return {

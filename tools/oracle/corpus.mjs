@@ -108,5 +108,14 @@ for (const [stratum, gen] of Object.entries(STRATA)) {
     for (const width of [390, 800]) layouts.push({ id: `${stratum}-${i}-${width}`, stratum, width, ...item });
   }
 }
+const TRAILING_LF = 24;
+for (const stratum of ["pre-tabs", "mono-wrap"]) {
+  for (let i = 0; i < TRAILING_LF; i++) {
+    const item = STRATA[stratum]();
+    const span = item.spans[0];
+    span.t = rnd() < 0.2 ? pick(["\n", "\n\n"]) : span.t + pick(["\n", "\n", "\n\n", "\n\n\n"]);
+    for (const width of [390, 800]) layouts.push({ id: `${stratum}-lf${i}-${width}`, stratum, width, ...item });
+  }
+}
 writeFileSync(outPath, JSON.stringify(layouts));
 console.log(layouts.length, "layouts,", Object.keys(STRATA).length, "strata");

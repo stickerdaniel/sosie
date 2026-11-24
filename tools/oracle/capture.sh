@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-image="${SOSIE_REF_IMAGE:-sosie-ref:stage0}"
+pinned="sha256:5efae82b8506de988fbb5ce15766350e339cf9da75ee8957cc8f10148e988f9b"
+image="${SOSIE_REF_IMAGE:-$pinned}"
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 text="tests/golden/synthetic/text"
 paint="tests/golden/synthetic/paint"
 stage="target/oracle"
 
 cd "$root"
+id="$(docker image inspect "$image" --format '{{.Id}}')"
+if [ "$id" != "$pinned" ]; then
+  echo "reference image $image is $id, capture.sh pins $pinned" >&2
+  exit 1
+fi
 mkdir -p "$text" "$paint" "$stage"
 
 node tools/oracle/corpus.mjs 20261124 "$text/corpus-1.json"
@@ -26,4 +32,4 @@ for set in 1 2; do
   oracle paint "$paint/cases-$set.json" "$stage/paint-$set" | tee "$stage/paint-$set.log"
   mv "$stage/paint-$set/boxes.json" "$paint/boxes-$set.json"
 done
-docker image inspect "$image" --format '{{.Id}}' > "$stage/image-id"
+echo "$id" > "$stage/image-id"

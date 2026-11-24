@@ -9,19 +9,21 @@
       },
       "crop": "none: line geometry only",
       "inputs": {
-        "tests/golden/synthetic/text/corpus-1.json": "feb1b13aa18a451f780d58c3696fcaf9f9cc9b3be287d8a437fcf05dc6d11693",
-        "tests/golden/synthetic/text/corpus-2.json": "9574b65e63365ba56b06546477ef207f19d0b6ebcfedfd4a69b4886aa9582df7"
+        "tests/golden/synthetic/text/corpus-1.json": "18f582551cc1ced63236e89a819eb2b7870016fe2ee669641df425214d8eaabb",
+        "tests/golden/synthetic/text/corpus-2.json": "54caa4a6b5835e27ee051fe4c1d79a4d0b4f953d577ed1ebe8a4c5227cbba4ac"
       },
       "geometry": {
-        "tests/golden/synthetic/text/chrome-1.json": "0bad9822476d5ba618be7e6207a1cb3528cf5764faec9cbcf8ca3121cfbca280",
-        "tests/golden/synthetic/text/chrome-2.json": "620e02745d43c6e3812114654432f559de6f9c3d82b7c74c0e13cc6ad65c9d29"
+        "tests/golden/synthetic/text/chrome-1.json": "f279a336e59485459f5ac10769ac36386a32235e1977f8bd2ff08f97423f5307",
+        "tests/golden/synthetic/text/chrome-2.json": "89777b51c72f34ea643590c88f62d60c0d1cb841953ad083e069ddd40d9ed09f"
       },
       "harness": {
         "tools/oracle/text-parity.mjs": "f250864af4f6b3aa3bb1c6d252af8fff02db6e36fa2ab0ac73331efa05b96028",
         "tools/oracle/lib.mjs": "7abadd129aa3efbb8c814ed7c174c7cc012966089d6ce449471cb0ef6b59c386",
         "tools/oracle/themes.mjs": "ba57d89a05021ef174ec627f41ac8292a88fad48fe3621c0a91f4d3bb3b7f14b",
-        "tools/oracle/capture.sh": "437ad4f5e3f4ea2e485e4f69105f961e40cb517f45206789b1129f0734319c3e",
-        "tools/oracle/corpus.mjs": "b96284bdfa70f704b0056d22c59f24c0daf8941e44e2d9b76bd590a8525393c6"
+        "tools/oracle/capture.sh": "c7157e6b3797bc0737f590dcb96483d2e0801a892413bcad56a7649d3f4207c6",
+        "tools/oracle/ref/Dockerfile": "98565bced1ba6a37ff803b0d92d33baae7d3b8ff5d635a14cab1491f4d4e0535",
+        "tools/oracle/ref/fonts.conf": "8e6e356c22859e20571a76eaa94fe1646982e3105a982cb625011425124dc8c1",
+        "tools/oracle/corpus.mjs": "dbc367a472a28180e6f28ddb791984978a5d6c6b252386356e1f44ec9b5ae3ff"
       },
       "capture": {
         "image": "sha256:5efae82b8506de988fbb5ce15766350e339cf9da75ee8957cc8f10148e988f9b",
@@ -61,7 +63,9 @@
         "tools/oracle/text-parity.mjs": "f250864af4f6b3aa3bb1c6d252af8fff02db6e36fa2ab0ac73331efa05b96028",
         "tools/oracle/lib.mjs": "7abadd129aa3efbb8c814ed7c174c7cc012966089d6ce449471cb0ef6b59c386",
         "tools/oracle/themes.mjs": "ba57d89a05021ef174ec627f41ac8292a88fad48fe3621c0a91f4d3bb3b7f14b",
-        "tools/oracle/capture.sh": "437ad4f5e3f4ea2e485e4f69105f961e40cb517f45206789b1129f0734319c3e",
+        "tools/oracle/capture.sh": "c7157e6b3797bc0737f590dcb96483d2e0801a892413bcad56a7649d3f4207c6",
+        "tools/oracle/ref/Dockerfile": "98565bced1ba6a37ff803b0d92d33baae7d3b8ff5d635a14cab1491f4d4e0535",
+        "tools/oracle/ref/fonts.conf": "8e6e356c22859e20571a76eaa94fe1646982e3105a982cb625011425124dc8c1",
         "tools/oracle/paint-cases.mjs": "fbb9573ea8b7b372b2ec5dd30fe616a52f41e348e1d9ef222caa1b5e10cb13eb"
       },
       "capture": {

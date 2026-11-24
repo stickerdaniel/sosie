@@ -519,6 +519,12 @@ impl<'a> Para<'a> {
                 trim[k - 1 - ls].1 += half(k - 1);
             }
         }
+        for k in ls..le {
+            if self.g[k].level % 2 == 1 && matches!(kind(k), K::Open | K::Close) {
+                let (lead, tail) = trim[k - ls];
+                trim[k - ls] = (tail, lead);
+            }
+        }
         trim
     }
 
@@ -796,7 +802,6 @@ impl<'a> Para<'a> {
                 continue;
             }
             self.shape_into(a, b, &mut glyphs);
-            let rtl = first.level % 2 == 1;
             let origin = first.start;
             let end = self.g[b - 1].end - origin;
             let mut anchors: Vec<usize> = glyphs.iter().map(|g| g.cluster as usize).collect();
@@ -833,11 +838,10 @@ impl<'a> Para<'a> {
                 for g in i..j {
                     let gl = &glyphs[g];
                     if g == 0 || glyphs[g - 1].cluster != gl.cluster {
-                        let (lead, tail) = graphemes(gl.cluster).fold((0.0, 0.0), |(l, t), k| {
-                            (l + trims[k - ls].0, t + trims[k - ls].1)
-                        });
                         let before;
-                        (before, after) = if rtl { (tail, lead) } else { (lead, tail) };
+                        (before, after) = graphemes(gl.cluster).fold((0.0, 0.0), |(b, a), k| {
+                            (b + trims[k - ls].0, a + trims[k - ls].1)
+                        });
                         x -= before;
                     }
                     out.push(GlyphPos {

@@ -906,3 +906,46 @@ fn whitespace_after_a_break_hangs_like_chromium() {
         );
     }
 }
+
+#[test]
+fn unmirrored_punctuation_keeps_its_trim_side_in_rtl() {
+    let fonts = all_fonts();
+    for (mark, next, ltr_ink, rtl_ink) in [
+        ("。", "）文\u{202c}", (48, 52), (179, 183)),
+        ("、", "）文\u{202c}", (48, 52), (179, 183)),
+        ("，", "）文\u{202c}", (49, 52), (180, 183)),
+        ("．", "）文\u{202c}", (50, 52), (181, 183)),
+        ("。", "。文\u{202c}", (48, 52), (179, 183)),
+    ] {
+        for (direction, left, ink) in [
+            (Direction::Ltr, 48.0, ltr_ink),
+            (Direction::Rtl, 179.0, rtl_ink),
+        ] {
+            let p = Paragraph {
+                width: 180.0,
+                strut: cjk(14.0, "#000000"),
+                overflow_wrap: OverflowWrap::Normal,
+                direction,
+            };
+            let t = layout(
+                &fonts,
+                &p,
+                &spans(&[
+                    ("\u{202e}中", 14.0, "#000000"),
+                    (mark, 14.0, "#ff0000"),
+                    (next, 14.0, "#000000"),
+                ]),
+            )
+            .unwrap_or_else(|e| panic!("{e}"));
+            let (x, xs) = painted(&fonts, &t, "#ff0000");
+            assert!(
+                (x - left).abs() <= 1.0 / 64.0,
+                "{mark}{next} {direction:?}: mark at {x}, Chromium {left}"
+            );
+            assert!(
+                xs.0.abs_diff(ink.0) <= 1 && xs.1.abs_diff(ink.1) <= 1,
+                "{mark}{next} {direction:?}: mark ink x {xs:?}, Chromium {ink:?}"
+            );
+        }
+    }
+}

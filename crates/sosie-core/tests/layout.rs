@@ -1072,3 +1072,104 @@ fn the_last_line_may_end_a_sixty_fourth_past_the_width() {
         (&[(W, "aa bb cc dd")], 30.0, 160.0, Some((24.0, 122.0))),
     ]);
 }
+
+#[test]
+fn a_spans_own_white_space_governs_wrapping_inside_it() {
+    let fonts = all_fonts();
+    let mono = |white_space| TextStyle {
+        family: FamilyList::parse(MONO),
+        size: 10.0,
+        line_height: 80.0,
+        tab_size: 1,
+        ..style(MONO, white_space)
+    };
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P};
+    for (strut, inline, text, width, height, last) in [
+        (B, P, "aa bb cc dd", 30.0, 80.0, (60.0, 42.0)),
+        (N, P, "aa bb cc dd", 30.0, 80.0, (60.0, 42.0)),
+        (P, N, "aa bb cc dd", 30.0, 160.0, (24.0, 122.0)),
+        (N, P, "aa-bb", 25.0, 80.0, (24.0, 42.0)),
+    ] {
+        let p = Paragraph {
+            width,
+            strut: mono(strut),
+            overflow_wrap: OverflowWrap::Normal,
+            direction: Direction::Ltr,
+        };
+        let t = layout(
+            &fonts,
+            &p,
+            &[Inline::Text {
+                text: text.to_string(),
+                style: mono(inline),
+            }],
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        let mut list = DisplayList::new(100.0, 400.0, hex("#ffffff"));
+        t.paint(&mut list, 0.0, 0.0);
+        let got = list
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Glyphs {
+                    x,
+                    baseline,
+                    glyphs,
+                    ..
+                } => glyphs.last().map(|g| (x + g.x, baseline + g.y)),
+                _ => None,
+            })
+            .next_back();
+        assert_eq!(t.height, height, "{inline:?} in {strut:?}: height");
+        assert!(
+            got.is_some_and(|g| (g.0 - last.0).abs() <= 1.0 / 64.0 && g.1 == last.1),
+            "{inline:?} in {strut:?}: last glyph at {got:?}, Chromium {last:?}"
+        );
+    }
+}
+
+#[test]
+fn a_break_between_spans_follows_the_span_before_it_or_the_strut() {
+    use WhiteSpace::{Normal as N, Pre as P};
+    let fonts = all_fonts();
+    let mono = |white_space| TextStyle {
+        family: FamilyList::parse(MONO),
+        size: 10.0,
+        line_height: 80.0,
+        tab_size: 1,
+        ..style(MONO, white_space)
+    };
+    for (strut, first, second, height) in [
+        (P, P, P, 80.0),
+        (N, P, P, 160.0),
+        (P, P, N, 80.0),
+        (P, N, P, 160.0),
+        (P, N, N, 160.0),
+    ] {
+        let p = Paragraph {
+            width: 25.0,
+            strut: mono(strut),
+            overflow_wrap: OverflowWrap::Normal,
+            direction: Direction::Ltr,
+        };
+        let t = layout(
+            &fonts,
+            &p,
+            &[
+                Inline::Text {
+                    text: "aa-".to_string(),
+                    style: mono(first),
+                },
+                Inline::Text {
+                    text: "bb".to_string(),
+                    style: mono(second),
+                },
+            ],
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(
+            t.height, height,
+            "{first:?} then {second:?} in {strut:?}: height"
+        );
+    }
+}

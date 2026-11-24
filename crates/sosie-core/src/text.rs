@@ -645,10 +645,6 @@ impl<'a> Para<'a> {
             out.push((hs, hs));
             return;
         }
-        if !self.wrap {
-            out.push((hs, he));
-            return;
-        }
         let a = self.g[hs].start;
         let b = self.g[he - 1].end;
         let mut opps: Vec<usize> = linebreak::line_breaks(&self.text[a..b])
@@ -674,6 +670,11 @@ impl<'a> Para<'a> {
                 opps.push(k);
             }
         }
+        opps.retain(|&k| {
+            let (p, q) = (&self.g[k - 1], &self.g[k]);
+            self.styles[p.span].ws != WhiteSpace::Pre
+                || (self.wrap && p.span != q.span && !p.space && !p.tab)
+        });
         opps.sort_unstable();
         opps.dedup();
         let mut ls = hs;

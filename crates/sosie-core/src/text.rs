@@ -630,16 +630,17 @@ impl<'a> Para<'a> {
         let b = self.g[he - 1].end;
         let mut opps: Vec<usize> = linebreak::line_breaks(&self.text[a..b])
             .into_iter()
-            .filter_map(|o| (hs..he).find(|&k| self.g[k].start == a + o))
+            .filter_map(|o| {
+                self.g[hs..he]
+                    .binary_search_by_key(&(a + o), |g| g.start)
+                    .ok()
+                    .map(|i| hs + i)
+            })
             .collect();
         for k in hs + 1..he {
             let (p, q) = (&self.g[k - 1], &self.g[k]);
             let ws = self.styles[p.span].ws;
-            if matches!(ws, WhiteSpace::BreakSpaces | WhiteSpace::PreWrap)
-                && p.space
-                && !q.space
-                && !opps.contains(&k)
-            {
+            if matches!(ws, WhiteSpace::BreakSpaces | WhiteSpace::PreWrap) && p.space && !q.space {
                 opps.push(k);
             }
         }

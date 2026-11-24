@@ -29,27 +29,40 @@ struct Strike {
     levels: Mutex<Vec<Arc<Level>>>,
 }
 
-type StrikeCache = Mutex<HashMap<(u16, u32, u32), Option<Arc<Strike>>>>;
+const CACHE_BYTES: usize = 64 << 20;
 
-fn strikes() -> &'static StrikeCache {
-    static CACHE: OnceLock<StrikeCache> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+#[derive(Default)]
+struct StrikeCache {
+    map: HashMap<(u16, u32), Option<Arc<Strike>>>,
+    bytes: usize,
+}
+
+fn strikes() -> &'static Mutex<StrikeCache> {
+    static CACHE: OnceLock<Mutex<StrikeCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(StrikeCache::default()))
 }
 
 fn strike(face: &Face, glyph: u32, size_dev: f32) -> Option<Arc<Strike>> {
-    let key = (face.id, glyph, (size_dev * 64.0).round() as u32);
+    let key = (face.id, glyph);
     if let Some(s) = strikes()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
+        .map
         .get(&key)
     {
         return s.clone();
     }
     let decoded = decode(face, glyph, size_dev).map(Arc::new);
-    strikes()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(key, decoded.clone());
+    let bytes = decoded
+        .as_ref()
+        .map_or(0, |s| 2 * s.w as usize * s.h as usize * 16);
+    let mut cache = strikes().lock().unwrap_or_else(|e| e.into_inner());
+    if cache.bytes + bytes > CACHE_BYTES {
+        cache.map.clear();
+        cache.bytes = 0;
+    }
+    cache.bytes += bytes;
+    cache.map.insert(key, decoded.clone());
     decoded
 }
 

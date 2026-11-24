@@ -229,10 +229,10 @@ impl Renderer<'_> {
         if !visible {
             return;
         }
-        let left = b.left().floor();
-        let top = b.top().floor();
-        let w = (b.right().ceil() - left).max(0.0) as u32;
-        let h = (b.bottom().ceil() - top).max(0.0) as u32;
+        let left = b.left().floor().max(0.0);
+        let top = b.top().floor().max(0.0);
+        let w = (b.right().ceil().min(self.pm.width as f32) - left).max(0.0) as u32;
+        let h = (b.bottom().ceil().min(self.pm.height as f32) - top).max(0.0) as u32;
         if w == 0 || h == 0 {
             return;
         }

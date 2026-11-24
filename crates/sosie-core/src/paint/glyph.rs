@@ -396,3 +396,38 @@ pub(crate) static GAMMA_TABLES: [[u8; 256]; 8] = [
         253, 254, 255,
     ],
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::GAMMA_TABLES;
+
+    fn correcting_lut(src_i: u32, contrast: f32, gamma: f32) -> [u8; 256] {
+        let to = |v: f32| v.powf(gamma);
+        let from = |v: f32| v.powf(1.0 / gamma);
+        let src = src_i as f32 / 255.0;
+        let dst = 1.0 - src;
+        let (lin_src, lin_dst) = (to(src), to(dst));
+        let adj = contrast * lin_dst;
+        let mut t = [0u8; 256];
+        for (i, o) in t.iter_mut().enumerate() {
+            let raw = i as f32 / 255.0;
+            let srca = raw + (1.0 - raw) * adj * raw;
+            let r = if (src - dst).abs() < 1.0 / 256.0 {
+                srca
+            } else {
+                (from(lin_src * srca + (1.0 - srca) * lin_dst) - dst) / (src - dst)
+            };
+            *o = (255.0 * r).round().clamp(0.0, 255.0) as u8;
+        }
+        t
+    }
+
+    #[test]
+    fn embedded_gamma_tables_follow_skia_preblend_at_contrast_0_2_and_gamma_1_2() {
+        for (i, table) in GAMMA_TABLES.iter().enumerate() {
+            let i = i as u32;
+            let src_i = (i << 5) | (i << 2) | (i >> 1);
+            assert_eq!(*table, correcting_lut(src_i, 0.2, 1.2), "table {i}");
+        }
+    }
+}

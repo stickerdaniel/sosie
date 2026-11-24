@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "source": {
+    "image": "sha256:5efae82b8506de988fbb5ce15766350e339cf9da75ee8957cc8f10148e988f9b",
+    "base": "ubuntu@sha256:562111b88caa79c71391c0c4d3c2114a7d5c35915c20561fd893cb1e07929e6b",
+    "snapshot": "20261123T000000Z",
+    "packages": {
+      "fonts-noto-core": "20201225-2",
+      "fonts-liberation": "1:2.1.5-3",
+      "fonts-noto-color-emoji": "2.047-0ubuntu0.24.04.1",
+      "fonts-noto-cjk": "1:20230817+repack1-3"
+    }
+  },
+  "fonts": [
+    { "file": "NotoSans-Regular.ttf", "postscript": "NotoSans-Regular", "pack": "core", "package": "fonts-noto-core", "licence": "OFL-1.1", "bytes": 512672, "sha256": "89c3c497f618fdaa0b2d1e98fef93582f28c71debd2c4a8cdf41f190ced2909d" },
+    { "file": "NotoSans-Bold.ttf", "postscript": "NotoSans-Bold", "pack": "core", "package": "fonts-noto-core", "licence": "OFL-1.1", "bytes": 515752, "sha256": "e83493c945848ecd4a9ad0f6d19164541a0d3e23a9c952304a00a46e00272ac5" },
+    { "file": "NotoSans-Italic.ttf", "postscript": "NotoSans-Italic", "pack": "core", "package": "fonts-noto-core", "licence": "OFL-1.1", "bytes": 530120, "sha256": "5d7618dda819443fd07301c84adcee9fe8960c873ea5e5e1f0f59db384b78082" },
+    { "file": "NotoSans-BoldItalic.ttf", "postscript": "NotoSans-BoldItalic", "pack": "core", "package": "fonts-noto-core", "licence": "OFL-1.1", "bytes": 534180, "sha256": "4315b26e5afb62f70f5ffe0edaa3363e57765ff2af2beda12b6fef197e3e5f5a" },
+    { "file": "LiberationMono-Regular.ttf", "postscript": "LiberationMono", "pack": "core", "package": "fonts-liberation", "licence": "OFL-1.1", "bytes": 319624, "sha256": "395fa5ab8d40c8eba390ced528744ea75a7f69aabf3e68b6f925ca0e39a27370" },
+    { "file": "LiberationMono-Bold.ttf", "postscript": "LiberationMono-Bold", "pack": "core", "package": "fonts-liberation", "licence": "OFL-1.1", "bytes": 308068, "sha256": "626655e94dd82f3f42549daf995c921b0915fa8ab1f4b839559e8892ea41d240" },
+    { "file": "NotoColorEmoji.ttf", "postscript": "NotoColorEmoji", "pack": "emoji", "package": "fonts-noto-color-emoji", "licence": "OFL-1.1", "bytes": 10788068, "sha256": "93cdc4ee9aa40e2afceecc63da0ca05ec7aab4bec991ece51a6b52389f48a477" },
+    { "file": "NotoSansCJK-Regular.ttc", "postscript": "NotoSansCJKjp-Regular", "pack": "cjk", "package": "fonts-noto-cjk", "licence": "OFL-1.1", "bytes": 19484784, "sha256": "b76b0433203017ca80401b2ee0dd69350349871c4b19d504c34dbdd80541690a" },
+    { "file": "NotoSansArabic-Regular.ttf", "postscript": "NotoSansArabic-Regular", "pack": "arabic", "package": "fonts-noto-core", "licence": "OFL-1.1", "bytes": 244072, "sha256": "504d7407d86875acf7d04dfaa0fd7524d0b8797723bc4aa18022f29db25b0b6e" },
+    { "file": "NotoSansHebrew-Regular.ttf", "postscript": "NotoSansHebrew-Regular", "pack": "hebrew", "package": "fonts-noto-core", "licence": "OFL-1.1", "bytes": 26892, "sha256": "436900d5ad77d33e4234247f3076eaecd25b92b9bea0519514f684140e3566a7" }
+  ]
+}

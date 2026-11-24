@@ -7,3 +7,5 @@ The repository is private and under construction.
 ## License
 
 Apache-2.0. See `LICENSE` and `NOTICE`.
+
+The pixel bundle check runs on pull requests.

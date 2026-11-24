@@ -44,5 +44,7 @@ jobs:
         run: tools/fetch-goldens.sh
       - name: Tests, golden parity and determinism
         run: cargo test --workspace --release -- --nocapture
+      - name: Overflow-checked tests in a debug build
+        run: cargo test --workspace --lib --test layout --test limits
       - name: Text bench
         run: cargo run --release --example bench_text

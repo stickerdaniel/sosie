@@ -512,11 +512,11 @@ impl<'a> Para<'a> {
         let mut trim = vec![(0.0f32, 0.0f32); le.saturating_sub(ls)];
         for k in ls + 1..le {
             let (a, b) = (kind(k - 1), kind(k));
-            let half = self.styles[self.g[k].span].size / 2.0;
+            let half = |k: usize| self.styles[self.g[k].span].size / 2.0;
             if b == K::Open && a != K::Other {
-                trim[k - ls].0 += half;
+                trim[k - ls].0 += half(k);
             } else if matches!(a, K::Close | K::Dot) && matches!(b, K::Close | K::Dot | K::Middle) {
-                trim[k - 1 - ls].1 += half;
+                trim[k - 1 - ls].1 += half(k - 1);
             }
         }
         trim
@@ -787,6 +787,7 @@ impl<'a> Para<'a> {
                 continue;
             }
             self.shape_into(a, b, &mut glyphs);
+            let rtl = first.level % 2 == 1;
             let origin = first.start;
             let end = self.g[b - 1].end - origin;
             let mut anchors: Vec<usize> = glyphs.iter().map(|g| g.cluster as usize).collect();
@@ -819,11 +820,16 @@ impl<'a> Para<'a> {
                 }
                 let mut x = shift + start;
                 let mut out = Vec::with_capacity(j - i);
+                let mut after = 0.0;
                 for g in i..j {
                     let gl = &glyphs[g];
-                    let ks = graphemes(gl.cluster);
                     if g == 0 || glyphs[g - 1].cluster != gl.cluster {
-                        x -= ks.clone().map(|k| trims[k - ls].0).sum::<f32>();
+                        let (lead, tail) = graphemes(gl.cluster).fold((0.0, 0.0), |(l, t), k| {
+                            (l + trims[k - ls].0, t + trims[k - ls].1)
+                        });
+                        let before;
+                        (before, after) = if rtl { (tail, lead) } else { (lead, tail) };
+                        x -= before;
                     }
                     out.push(GlyphPos {
                         id: gl.id,
@@ -832,7 +838,7 @@ impl<'a> Para<'a> {
                     });
                     x += gl.adv;
                     if glyphs.get(g + 1).is_none_or(|h| h.cluster != gl.cluster) {
-                        x -= ks.map(|k| trims[k - ls].1).sum::<f32>();
+                        x -= after;
                     }
                 }
                 runs.push(Run {

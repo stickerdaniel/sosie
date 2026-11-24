@@ -689,3 +689,129 @@ fn pre_wrap_whitespace_may_break_before_break_spaces_whitespace() {
         );
     }
 }
+
+fn cjk(size: f32, color: &str) -> TextStyle {
+    TextStyle {
+        size,
+        line_height: 80.0,
+        color: hex(color),
+        ..style("Noto Sans", WhiteSpace::Pre)
+    }
+}
+
+fn spans(parts: &[(&str, f32, &str)]) -> Vec<Inline> {
+    parts
+        .iter()
+        .map(|&(t, size, color)| Inline::Text {
+            text: t.to_string(),
+            style: cjk(size, color),
+        })
+        .collect()
+}
+
+fn painted(fonts: &Fonts, t: &TextLayout, color: &str) -> (f32, (u32, u32)) {
+    let mut list = DisplayList::new(320.0, 120.0, hex("#ffffff"));
+    t.paint(&mut list, 20.0, 0.0);
+    let want = hex(color);
+    let x = list
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Glyphs {
+                x, glyphs, color, ..
+            } if *color == want => glyphs.first().map(|g| x + g.x),
+            _ => None,
+        })
+        .fold(f32::INFINITY, f32::min);
+    let pm = rasterize(fonts, &list, 1.0, &Limits::default()).unwrap_or_else(|e| panic!("{e}"));
+    let xs: Vec<u32> = (0..pm.height)
+        .flat_map(|y| (0..pm.width).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            let i = ((y * pm.width + x) * 4) as usize;
+            let (r, g, b) = (pm.rgba[i], pm.rgba[i + 1], pm.rgba[i + 2]);
+            if want.r > want.b {
+                r > g && r > b
+            } else {
+                b > g && b > r
+            }
+        })
+        .map(|(x, _)| x)
+        .collect();
+    let ink = (
+        xs.iter().copied().min().unwrap_or(0),
+        xs.iter().copied().max().unwrap_or(0),
+    );
+    (x, ink)
+}
+
+#[test]
+fn an_rtl_trimmed_bracket_paints_where_chromium_puts_it() {
+    let fonts = all_fonts();
+    for (direction, left, ink) in [
+        (Direction::Ltr, 34.0, (34, 38)),
+        (Direction::Rtl, 85.0, (85, 89)),
+    ] {
+        let p = Paragraph {
+            width: 100.0,
+            strut: cjk(14.0, "#000000"),
+            overflow_wrap: OverflowWrap::Normal,
+            direction,
+        };
+        let t = layout(
+            &fonts,
+            &p,
+            &spans(&[
+                ("\u{202e}中「", 14.0, "#000000"),
+                ("（", 14.0, "#ff0000"),
+                ("文\u{202c}", 14.0, "#000000"),
+            ]),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        let (x, xs) = painted(&fonts, &t, "#ff0000");
+        assert!(
+            (x - left).abs() <= 1.0 / 64.0,
+            "{direction:?}: bracket at {x}, Chromium {left}"
+        );
+        assert!(
+            xs.0.abs_diff(ink.0) <= 1 && xs.1.abs_diff(ink.1) <= 1,
+            "{direction:?}: bracket ink x {xs:?}, Chromium {ink:?}"
+        );
+    }
+}
+
+#[test]
+fn a_cjk_trim_uses_the_trimmed_characters_own_size() {
+    let fonts = all_fonts();
+    let p = Paragraph {
+        width: 300.0,
+        strut: cjk(14.0, "#000000"),
+        overflow_wrap: OverflowWrap::Normal,
+        direction: Direction::Ltr,
+    };
+    for (first, second, advance, left, ink) in [
+        (14.0, 60.0, 141.0, 41.0, (43, 158)),
+        (60.0, 14.0, 118.0, 110.0, (110, 137)),
+        (0.0, 60.0, 120.0, 20.0, (22, 137)),
+    ] {
+        let t = layout(
+            &fonts,
+            &p,
+            &spans(&[("中。", first, "#ff0000"), ("。文", second, "#0000ff")]),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        let got = t.lines[0].advance;
+        assert!(
+            (got - advance).abs() <= 1.0 / 64.0,
+            "{first} then {second} px: advance {got}, Chromium {advance}"
+        );
+        let (x, xs) = painted(&fonts, &t, "#0000ff");
+        assert!(
+            (x - left).abs() <= 1.0 / 64.0,
+            "{first} then {second} px: second span at {x}, Chromium {left}"
+        );
+        assert!(
+            xs.0.abs_diff(ink.0) <= 1 && xs.1.abs_diff(ink.1) <= 1,
+            "{first} then {second} px: second span ink x {xs:?}, Chromium {ink:?}"
+        );
+    }
+}

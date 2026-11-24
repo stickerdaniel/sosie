@@ -701,7 +701,7 @@ impl<'a> Para<'a> {
                     k -= 1;
                 }
             }
-            let le = match chosen {
+            let mut le = match chosen {
                 Some(le) => le,
                 None if !self.anywhere => cand(0),
                 None => {
@@ -722,6 +722,15 @@ impl<'a> Para<'a> {
                     }
                 }
             };
+            while le < he && self.g[le].hang {
+                let span = self.g[le].span;
+                let end = (le..he).find(|&k| self.g[k].span != span).unwrap_or(he);
+                let run = (le..end).take_while(|&k| self.g[k].hang).count();
+                if run < end - le && self.g[le - 1].tab {
+                    break;
+                }
+                le += run;
+            }
             out.push((ls, le));
             ls = le;
         }

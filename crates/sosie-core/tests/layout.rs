@@ -815,3 +815,94 @@ fn a_cjk_trim_uses_the_trimmed_characters_own_size() {
         );
     }
 }
+
+#[test]
+fn whitespace_after_a_break_hangs_like_chromium() {
+    let fonts = all_fonts();
+    let mono = |white_space| TextStyle {
+        family: FamilyList::parse(MONO),
+        size: 10.0,
+        line_height: 80.0,
+        tab_size: 1,
+        ..style(MONO, white_space)
+    };
+    use WhiteSpace::{BreakSpaces as B, Normal as N, PreWrap as W};
+    let cases = [
+        (
+            &[(W, "a "), (N, " "), (B, " b")][..],
+            19.0,
+            OverflowWrap::Anywhere,
+            160.0,
+            6.0,
+            122.0,
+        ),
+        (
+            &[(B, "a "), (W, " "), (B, " b")],
+            7.0,
+            OverflowWrap::Normal,
+            240.0,
+            0.0,
+            202.0,
+        ),
+        (
+            &[(B, "a "), (W, " b")],
+            7.0,
+            OverflowWrap::Normal,
+            160.0,
+            0.0,
+            122.0,
+        ),
+        (
+            &[(B, "a\t"), (W, "\t"), (B, "\tb")],
+            7.0,
+            OverflowWrap::Normal,
+            240.0,
+            0.0,
+            202.0,
+        ),
+        (
+            &[(B, "a\t"), (W, " b")],
+            7.0,
+            OverflowWrap::Normal,
+            240.0,
+            0.0,
+            202.0,
+        ),
+    ];
+    for (parts, width, overflow_wrap, height, b_x, b_baseline) in cases {
+        let p = Paragraph {
+            width,
+            strut: mono(B),
+            overflow_wrap,
+            direction: Direction::Ltr,
+        };
+        let inlines: Vec<Inline> = parts
+            .iter()
+            .map(|&(ws, t)| Inline::Text {
+                text: t.to_string(),
+                style: mono(ws),
+            })
+            .collect();
+        let t = layout(&fonts, &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+        let mut list = DisplayList::new(100.0, 400.0, hex("#ffffff"));
+        t.paint(&mut list, 0.0, 0.0);
+        let b = list
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Glyphs {
+                    x,
+                    baseline,
+                    glyphs,
+                    ..
+                } => glyphs.last().map(|g| (x + g.x, baseline + g.y)),
+                _ => None,
+            })
+            .next_back();
+        assert_eq!(t.height, height, "{parts:?}: height");
+        assert!(
+            b.is_some_and(|(x, y)| (x - b_x).abs() <= 1.0 / 64.0 && y == b_baseline),
+            "{parts:?}: b at {b:?}, Chromium ({b_x}, {b_baseline})"
+        );
+    }
+}

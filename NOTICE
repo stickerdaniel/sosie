@@ -52,9 +52,11 @@ luminance (i << 5) | (i << 2) | (i >> 1) for i in 0 to 7. The formula was
 written from SkMaskGamma.cpp; no Skia revision was recorded at the time.
 The unit test in paint/glyph.rs regenerates all 8 tables from it.
 
-Skia, https://skia.org, is distributed under this license:
+Skia, https://skia.org, and tiny-skia 0.11.4 are distributed under this
+license. The copyright lines are those of tiny-skia's LICENSE:
 
   Copyright (c) 2011 Google Inc. All rights reserved.
+  Copyright (c) 2020 Yevhenii Reizner All rights reserved.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions are

@@ -46,7 +46,7 @@ This file states what the core guarantees, how each guarantee is checked, and th
 
 ## Limits
 
-`Limits::default()` accepts a dpr from 1 to 4, a device width up to 8,192 px, a device height up to 32,768 px and up to 64M pixels. `rasterize` checks the device size with saturating arithmetic before it allocates.
+`Limits::default()` accepts a dpr from 1 to 4, a device width up to 8,192 px, a device height up to 32,768 px and up to 64M pixels. `rasterize` checks the device size with saturating arithmetic before it allocates. A fill mask covers only the part of a shape inside the pixmap. The glyph cache holds at most 12 MiB and the emoji strike cache at most 64 MiB; a cache that would exceed its budget is emptied. Text length has no cap yet.
 
 ## Goldens
 

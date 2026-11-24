@@ -653,7 +653,7 @@ impl<'a> Para<'a> {
         for k in hs + 1..he {
             let (p, q) = (&self.g[k - 1], &self.g[k]);
             let after_space = match self.styles[p.span].ws {
-                WhiteSpace::BreakSpaces => p.space,
+                WhiteSpace::BreakSpaces => p.space || p.tab,
                 WhiteSpace::PreWrap => p.space && !q.space,
                 _ => false,
             };
@@ -781,21 +781,33 @@ impl<'a> Para<'a> {
             }
             self.shape_into(a, b, &mut glyphs);
             let origin = first.start;
-            let grapheme = |cluster: u32| {
-                let at = origin + cluster as usize;
-                a + self.g[a..b].partition_point(|g| g.start <= at).max(1) - 1
+            let end = self.g[b - 1].end - origin;
+            let mut anchors: Vec<usize> = glyphs.iter().map(|g| g.cluster as usize).collect();
+            anchors.sort_unstable();
+            anchors.dedup();
+            let index = |at: usize| a + self.g[a..b].partition_point(|g| g.start - origin < at);
+            let graphemes = |cluster: u32| {
+                let c = cluster as usize;
+                let next = anchors[anchors.partition_point(|&x| x <= c)..]
+                    .first()
+                    .copied()
+                    .unwrap_or(end);
+                let first = (index(c + 1) - 1).max(a);
+                first..index(next).max(first + 1)
             };
             let mut i = 0;
             while i < glyphs.len() {
-                let span = self.g[grapheme(glyphs[i].cluster)].span;
+                let span = self.g[graphemes(glyphs[i].cluster).start].span;
                 let mut j = i;
                 let mut start = f32::INFINITY;
                 while j < glyphs.len() {
-                    let k = grapheme(glyphs[j].cluster);
-                    if self.g[k].span != span {
+                    let ks = graphemes(glyphs[j].cluster);
+                    if self.g[ks.start].span != span {
                         break;
                     }
-                    start = start.min(vpos[k - ls].0);
+                    for k in ks {
+                        start = start.min(vpos[k - ls].0);
+                    }
                     j += 1;
                 }
                 let mut x = shift + start;

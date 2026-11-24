@@ -2,8 +2,9 @@ mod common;
 
 use common::{all_fonts, hex, MONO, SANS};
 use sosie_core::{
-    layout, Direction, DisplayList, FamilyList, Fonts, Inline, InlineBox, Item, LayoutError,
-    OverflowWrap, Paragraph, TextLayout, TextStyle, Warning, WhiteSpace, MAX_FONT_SIZE,
+    layout, rasterize, Direction, DisplayList, FamilyList, Fonts, Inline, InlineBox, Item,
+    LayoutError, Limits, OverflowWrap, Paragraph, TextLayout, TextStyle, Warning, WhiteSpace,
+    MAX_FONT_SIZE,
 };
 
 fn style(family: &str, white_space: WhiteSpace) -> TextStyle {
@@ -483,4 +484,100 @@ fn a_font_size_outside_the_supported_range_is_refused() {
         },
     };
     assert!(layout(&fonts, &p, &[largest]).is_ok());
+}
+
+fn arabic(size: f32, line_height: f32, white_space: WhiteSpace) -> TextStyle {
+    TextStyle {
+        family: FamilyList::parse("Noto Sans Arabic"),
+        size,
+        line_height,
+        color: hex("#000000"),
+        ..style(SANS, white_space)
+    }
+}
+
+#[test]
+fn an_rtl_ligature_paints_where_chromium_puts_it() {
+    let fonts = all_fonts();
+    let st = arabic(60.0, 80.0, WhiteSpace::Pre);
+    let p = Paragraph {
+        width: 40.0,
+        strut: st.clone(),
+        overflow_wrap: OverflowWrap::Normal,
+        direction: Direction::Rtl,
+    };
+    for (word, left, ink_x, ink_y) in [
+        ("لا", 25.078125, (27, 55), (16, 58)),
+        ("بلا", 7.90625, (10, 56), (16, 70)),
+        ("لالا", -9.84375, (0, 55), (16, 58)),
+    ] {
+        let t = layout(
+            &fonts,
+            &p,
+            &[Inline::Text {
+                text: word.to_string(),
+                style: st.clone(),
+            }],
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        let mut list = DisplayList::new(120.0, 100.0, hex("#ffffff"));
+        t.paint(&mut list, 20.0, 0.0);
+        let x = list
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Glyphs { x, glyphs, .. } => glyphs.first().map(|g| x + g.x),
+                _ => None,
+            })
+            .fold(f32::INFINITY, f32::min);
+        assert!(
+            (x - left).abs() <= 1.0 / 64.0,
+            "{word}: run starts at {x}, Chromium at {left}"
+        );
+        let pm =
+            rasterize(&fonts, &list, 1.0, &Limits::default()).unwrap_or_else(|e| panic!("{e}"));
+        let ink: Vec<(u32, u32)> = (0..pm.height)
+            .flat_map(|y| (0..pm.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| pm.rgba[((y * pm.width + x) * 4) as usize] != 255)
+            .collect();
+        let span = |v: Vec<u32>| (*v.iter().min().unwrap_or(&0), *v.iter().max().unwrap_or(&0));
+        let (xs, ys) = (
+            span(ink.iter().map(|p| p.0).collect()),
+            span(ink.iter().map(|p| p.1).collect()),
+        );
+        let near = |a: (u32, u32), b: (u32, u32)| a.0.abs_diff(b.0) <= 1 && a.1.abs_diff(b.1) <= 1;
+        assert!(near(xs, ink_x), "{word}: ink x {xs:?}, Chromium {ink_x:?}");
+        assert!(near(ys, ink_y), "{word}: ink y {ys:?}, Chromium {ink_y:?}");
+    }
+}
+
+#[test]
+fn break_spaces_may_break_after_each_preserved_tab() {
+    let fonts = all_fonts();
+    let mono = TextStyle {
+        family: FamilyList::parse(MONO),
+        size: 10.0,
+        line_height: 80.0,
+        tab_size: 1,
+        ..style(MONO, WhiteSpace::BreakSpaces)
+    };
+    let p = Paragraph {
+        width: 13.0,
+        strut: mono.clone(),
+        overflow_wrap: OverflowWrap::Normal,
+        direction: Direction::Ltr,
+    };
+    let t = layout(
+        &fonts,
+        &p,
+        &[Inline::Text {
+            text: "a\t\tb".to_string(),
+            style: mono,
+        }],
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let texts: Vec<&str> = t.lines.iter().map(|l| t.line_text(l)).collect();
+    assert_eq!(texts, ["a\t", "\tb"]);
+    assert_eq!(t.height, 160.0);
+    assert!(t.lines.iter().all(|l| l.advance <= 13.0));
 }

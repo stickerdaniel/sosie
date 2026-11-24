@@ -27,10 +27,11 @@ This file states what the core guarantees, how each guarantee is checked, and th
 ## Text layout
 
 - Line breaking: ICU4X UAX #14 at `line-break: auto` (Normal strictness), with Blink's ASCII fast path.
-- Shaping: harfrust per run of face, script and direction. The CJK face gets the `chws` feature.
+- Shaping: harfrust per run of face, size, script and direction. A span boundary splits a run only when padding sits at it, so equal adjacent spans keep kerning and Arabic joining. Paint splits each shaped run back into its spans. The CJK face gets the `chws` feature.
 - Sizes are truncated to 26.6 fixed point (`floor64(size * dpr)`). Advances come from that size, or from the strike ppem for a bitmap face.
 - Line fitting follows Blink: item widths rounded up to 1/64 px, a fit check with 1/64 px tolerance at spaces, a reshape at each candidate break, and an `overflow-wrap: anywhere` fallback.
-- `white-space`: `normal`, `pre`, `pre-wrap` and `break-spaces`, with `tab-size`.
+- `white-space`: `normal`, `pre`, `pre-wrap` and `break-spaces`, with `tab-size`. LF and CRLF end a preserved line. A preserved newline at the end of the text adds no line. `break-spaces` allows a break after every preserved space, `pre-wrap` after the last space of a run. A tab size of 0 gives a tab no advance.
+- Font size: 0 to 256 CSS px, else `layout` returns `LayoutError::FontSize`. 256 px times the maximum dpr of 4 is 1,024 device px, the largest size the glyph raster draws. GitHub's largest text, 32 px, times D6's largest font scale, 2, is 64 px.
 - Vertical metrics: `above = round(ascent) + floor((line-height - ascent - descent) / 2)`. A line takes the maximum over the strut and every span on it. An inline box counts as its height above the baseline.
 - Bidi: unicode-bidi per paragraph. Runs on a line are placed in visual order. An RTL base paragraph aligns to the right edge.
 
@@ -46,13 +47,13 @@ This file states what the core guarantees, how each guarantee is checked, and th
 
 ## Limits
 
-`Limits::default()` accepts a dpr from 1 to 4, a device width up to 8,192 px, a device height up to 32,768 px and up to 64M pixels. `rasterize` checks the device size with saturating arithmetic before it allocates. A fill mask covers only the part of a shape inside the pixmap. The glyph cache holds at most 12 MiB and the emoji strike cache at most 64 MiB; a cache that would exceed its budget is emptied. Text length has no cap yet.
+`Limits::default()` accepts a dpr from 1 to 4, a device width up to 8,192 px, a device height up to 32,768 px and up to 64M pixels. `rasterize` checks the device size with saturating arithmetic before it allocates. A fill mask covers only the part of a shape inside the pixmap. Glyph and emoji blits clip with saturating 64-bit spans, so a glyph at any finite position outside the pixmap is skipped. The glyph cache holds at most 12 MiB and the emoji strike cache at most 64 MiB; a cache that would exceed its budget is emptied. A failed emoji lookup is not cached. Text length has no cap yet.
 
 ## Goldens
 
-The reference is Chromium 141.0.7390.37 in the container built from `tools/oracle/ref/Dockerfile` (image `sha256:5efae82b8506de988fbb5ce15766350e339cf9da75ee8957cc8f10148e988f9b`, linux/amd64), with the fonts from `assets/fonts.lock.json`, locale en-US, timezone UTC, a fixed clock and dpr 2.
+The reference is Chromium 141.0.7390.37 in the container built from `tools/oracle/ref/Dockerfile` (image `sha256:5efae82b8506de988fbb5ce15766350e339cf9da75ee8957cc8f10148e988f9b`, linux/amd64; `capture.sh` refuses any other image id), with the fonts from `assets/fonts.lock.json`, locale en-US, timezone UTC, a fixed clock and dpr 2.
 
-- Text geometry: `tests/golden/synthetic/text`. Two seeded corpora, 4,032 layouts, line break positions and line widths from Chromium.
+- Text geometry: `tests/golden/synthetic/text`. Two seeded corpora, 4,224 layouts, block heights, line texts and line widths from Chromium. 192 of them, in `pre-tabs` and `mono-wrap`, end in one to three LF or consist of LF only.
 - Paint: `tests/golden/synthetic/paint`. Two seeded case sets of 240 cases each, border boxes from Chromium. The PNGs are in the release asset pinned by `tests/golden/pixels.lock.json`; `tools/fetch-goldens.sh` downloads and verifies it.
 - `tests/golden/stamps.json` records the hashes of inputs, geometry, harness, fonts lock and bundle. `node tools/golden-stamp.mjs --check` fails on any drift.
 - `tools/oracle/capture.sh` recaptures everything in the container.
@@ -61,7 +62,7 @@ The reference is Chromium 141.0.7390.37 in the container built from `tools/oracl
 
 ### Text
 
-A layout matches when every line break falls at the same text offset and every line width is within 4/64 px of Chromium's. The gate requires at least 2,000 gated layouts with 0 break and 0 width mismatches. CJK is reported and not gated.
+A layout matches when its height is within 1/64 px of Chromium's block height, every line break falls at the same text offset and every line width is within 4/64 px of Chromium's. Chromium's line list omits lines without text, so the block height carries empty lines. The gate requires the 11 strata of stage 0, at least 2,000 gated layouts, and 0 height, break and width mismatches. CJK is reported and not gated. Every layout's height matches Chromium's exactly.
 
 | Stratum | Layouts | Break mismatches | Width mismatches | Max width diff (px) |
 | --- | --- | --- | --- | --- |
@@ -74,11 +75,11 @@ A layout matches when every line break falls at the same text offset and every l
 | latin-prose | 336 | 0 | 0 | 0.0154 |
 | long-tokens | 336 | 0 | 0 | 0.0211 |
 | mixed-mono | 336 | 0 | 0 | 0.0168 |
-| mono-wrap | 336 | 0 | 0 | 0.0137 |
-| pre-tabs | 336 | 0 | 0 | 0.0269 |
+| mono-wrap | 432 | 0 | 0 | 0.0137 |
+| pre-tabs | 432 | 0 | 0 | 0.0269 |
 | cjk (reported) | 336 | 2 | 7 | 0.7019 |
 
-Gated layouts: 3,696.
+Gated layouts: 3,888.
 
 ### Pixels
 

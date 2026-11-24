@@ -581,3 +581,111 @@ fn break_spaces_may_break_after_each_preserved_tab() {
     assert_eq!(t.height, 160.0);
     assert!(t.lines.iter().all(|l| l.advance <= 13.0));
 }
+
+#[test]
+fn trimmed_cjk_brackets_paint_inside_the_measured_box() {
+    let fonts = all_fonts();
+    let st = TextStyle {
+        line_height: 80.0,
+        color: hex("#000000"),
+        ..style("Noto Sans", WhiteSpace::Pre)
+    };
+    let short = [0.0, 14.0, 21.0, 35.0];
+    let long = [0.0, 14.0, 21.0, 35.0, 49.0, 56.0, 70.0];
+    let cases: [(&[&str], f32, &[f32], u32); 4] = [
+        (&["中「（文"], 49.0, &short, 48),
+        (&["中「（", "文"], 49.0, &short, 48),
+        (&["中「（文。）A"], 78.953125, &long, 78),
+        (&["中「（文。", "）A"], 78.953125, &long, 78),
+    ];
+    for (parts, advance, chromium, ink_right) in cases {
+        let p = Paragraph {
+            width: advance,
+            strut: st.clone(),
+            overflow_wrap: OverflowWrap::Normal,
+            direction: Direction::Ltr,
+        };
+        let inlines: Vec<Inline> = parts
+            .iter()
+            .map(|t| Inline::Text {
+                text: t.to_string(),
+                style: st.clone(),
+            })
+            .collect();
+        let t = layout(&fonts, &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+        assert!(
+            (t.lines[0].advance - advance).abs() <= 1.0 / 64.0,
+            "{parts:?}: advance {}, Chromium {advance}",
+            t.lines[0].advance
+        );
+        let xs = glyph_xs(&t);
+        assert!(
+            xs.len() == chromium.len()
+                && xs
+                    .iter()
+                    .zip(chromium)
+                    .all(|(x, c)| (x - c).abs() <= 1.0 / 64.0),
+            "{parts:?}: glyphs at {xs:?}, Chromium {chromium:?}"
+        );
+        let mut list = DisplayList::new(200.0, 100.0, hex("#ffffff"));
+        t.paint(&mut list, 0.0, 0.0);
+        let pm =
+            rasterize(&fonts, &list, 1.0, &Limits::default()).unwrap_or_else(|e| panic!("{e}"));
+        let ink: Vec<u32> = (0..pm.height)
+            .flat_map(|y| (0..pm.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| pm.rgba[((y * pm.width + x) * 4) as usize] != 255)
+            .map(|(x, _)| x)
+            .collect();
+        let (left, right) = (
+            ink.iter().copied().min().unwrap_or(0),
+            ink.iter().copied().max().unwrap_or(0),
+        );
+        assert!(
+            left.abs_diff(1) <= 1 && right.abs_diff(ink_right) <= 1 && (right as f32) < advance,
+            "{parts:?}: ink x {left}..{right}, Chromium 1..{ink_right}"
+        );
+    }
+}
+
+#[test]
+fn pre_wrap_whitespace_may_break_before_break_spaces_whitespace() {
+    let fonts = all_fonts();
+    let mono = |white_space| TextStyle {
+        family: FamilyList::parse(MONO),
+        size: 10.0,
+        line_height: 80.0,
+        tab_size: 1,
+        ..style(MONO, white_space)
+    };
+    let p = Paragraph {
+        width: 13.0,
+        strut: mono(WhiteSpace::BreakSpaces),
+        overflow_wrap: OverflowWrap::Normal,
+        direction: Direction::Ltr,
+    };
+    for (first, second, b_left) in [("a\t", "\tb", 6.015625), ("a ", " b", 6.0)] {
+        let t = layout(
+            &fonts,
+            &p,
+            &[
+                Inline::Text {
+                    text: first.to_string(),
+                    style: mono(WhiteSpace::PreWrap),
+                },
+                Inline::Text {
+                    text: second.to_string(),
+                    style: mono(WhiteSpace::BreakSpaces),
+                },
+            ],
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        let texts: Vec<&str> = t.lines.iter().map(|l| t.line_text(l)).collect();
+        assert_eq!(texts, [first, second]);
+        assert_eq!(t.height, 160.0);
+        let b = glyph_xs(&t).last().copied().unwrap_or(f32::NAN);
+        assert!(
+            (b - b_left).abs() <= 1.0 / 64.0,
+            "{first:?}{second:?}: b at {b}, Chromium {b_left}"
+        );
+    }
+}

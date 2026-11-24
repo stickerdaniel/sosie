@@ -472,7 +472,9 @@ impl<'a> Para<'a> {
                 }
             }
         }
-        self.han_trim(ls, le, &mut adv);
+        for (a, (lead, tail)) in adv.iter_mut().zip(self.han_trim(ls, le)) {
+            *a -= lead + tail;
+        }
         adv
     }
 
@@ -481,7 +483,7 @@ impl<'a> Para<'a> {
         !g.atom && self.fonts.expect(g.face).family() == Family::NotoSansCjk
     }
 
-    fn han_trim(&self, ls: usize, le: usize, adv: &mut [f32]) {
+    fn han_trim(&self, ls: usize, le: usize) -> Vec<(f32, f32)> {
         #[derive(PartialEq, Clone, Copy)]
         enum K {
             Open,
@@ -507,15 +509,17 @@ impl<'a> Para<'a> {
                 _ => K::Other,
             }
         };
+        let mut trim = vec![(0.0f32, 0.0f32); le.saturating_sub(ls)];
         for k in ls + 1..le {
             let (a, b) = (kind(k - 1), kind(k));
-            let size = self.styles[self.g[k].span].size;
+            let half = self.styles[self.g[k].span].size / 2.0;
             if b == K::Open && a != K::Other {
-                adv[k - ls] -= size / 2.0;
+                trim[k - ls].0 += half;
             } else if matches!(a, K::Close | K::Dot) && matches!(b, K::Close | K::Dot | K::Middle) {
-                adv[k - 1 - ls] -= size / 2.0;
+                trim[k - 1 - ls].1 += half;
             }
         }
+        trim
     }
 
     fn space_width(&self, span: usize) -> f32 {
@@ -652,9 +656,11 @@ impl<'a> Para<'a> {
             .collect();
         for k in hs + 1..he {
             let (p, q) = (&self.g[k - 1], &self.g[k]);
-            let after_space = match self.styles[p.span].ws {
-                WhiteSpace::BreakSpaces => p.space || p.tab,
-                WhiteSpace::PreWrap => p.space && !q.space,
+            let (pw, qw) = (self.styles[p.span].ws, self.styles[q.span].ws);
+            let blank = |g: &G| g.space || g.tab;
+            let after_space = match pw {
+                WhiteSpace::BreakSpaces => blank(p),
+                WhiteSpace::PreWrap => (p.space && !q.space) || (blank(p) && blank(q) && qw != pw),
                 _ => false,
             };
             if after_space {
@@ -760,6 +766,7 @@ impl<'a> Para<'a> {
             above = above.max(a);
             below = below.max(b);
         }
+        let trims = self.han_trim(ls, t);
         let mut runs = Vec::new();
         let mut boxes = Vec::new();
         let mut glyphs = Vec::new();
@@ -812,13 +819,21 @@ impl<'a> Para<'a> {
                 }
                 let mut x = shift + start;
                 let mut out = Vec::with_capacity(j - i);
-                for gl in &glyphs[i..j] {
+                for g in i..j {
+                    let gl = &glyphs[g];
+                    let ks = graphemes(gl.cluster);
+                    if g == 0 || glyphs[g - 1].cluster != gl.cluster {
+                        x -= ks.clone().map(|k| trims[k - ls].0).sum::<f32>();
+                    }
                     out.push(GlyphPos {
                         id: gl.id,
                         x: x + gl.dx,
                         y: -gl.dy,
                     });
                     x += gl.adv;
+                    if glyphs.get(g + 1).is_none_or(|h| h.cluster != gl.cluster) {
+                        x -= ks.map(|k| trims[k - ls].1).sum::<f32>();
+                    }
                 }
                 runs.push(Run {
                     face: first.face,

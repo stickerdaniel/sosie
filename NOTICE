@@ -6,4 +6,48 @@ This product is licensed under the Apache License, Version 2.0 (LICENSE).
 Files copied or adapted from xeet (Apache-2.0) are listed below with their
 source commit and a change note, as Apache-2.0 section 4 requires.
 
-(none yet)
+Source: xeet, https://github.com/rauchg/xeet, commit 095ba15,
+crates/xeet-core/src. Copyright the xeet authors, Apache License 2.0.
+
+Every file below has its source comments removed. The other changes per file:
+
+Copied, code unchanged
+  blink_ascii.rs        from blink_ascii.rs
+  script.rs             from script.rs
+
+Adapted
+  linebreak.rs          from linebreak.rs, line break strictness set to
+                        Normal (CSS line-break: auto)
+  color.rs              from color.rs, Rgba::rgba constructor removed,
+                        parse_hex builds the struct directly
+  paint/coverage.rs     from paint/coverage.rs, mask_transformed removed,
+                        mask and SUBSAMPLES limited to tests
+  paint/encode.rs       from paint/encode.rs, encode_png_best removed
+  shape.rs              from shape.rs, plan key reduced to face, direction
+                        and script, chws feature on the CJK face, advances
+                        from the 26.6 size or the bitmap strike
+  text.rs               from the xeet inline layout model, rewritten for CSS
+                        spans, white-space, overflow-wrap, inline boxes,
+                        per-cluster font fallback and bidi line order
+  paint/mod.rs          from paint/mod.rs, display list items reduced to
+                        fills, borders, glyph runs and text backgrounds,
+                        device size checked against Limits before allocation
+  paint/glyph.rs        from paint/glyph.rs, outline y snapped to 1/4 px,
+                        quadratics chopped at y extrema and flattened with
+                        Skia subdivision counts, embedded Skia mask gamma
+                        tables
+  paint/shapes.rs       from paint/shapes.rs, squircles removed
+
+Fonts
+
+assets/fonts holds font files taken from Ubuntu 24.04 packages (versions
+in assets/fonts.lock.json). They are licensed under the SIL Open Font
+License 1.1, not Apache-2.0:
+
+  Noto Sans, Noto Sans Arabic, Noto Sans Hebrew   fonts-noto-core
+  Noto Sans CJK                                    fonts-noto-cjk
+  Noto Color Emoji                                 fonts-noto-color-emoji
+  Liberation Mono                                  fonts-liberation
+
+The package copyright files with the full license texts are in
+assets/fonts/licenses.

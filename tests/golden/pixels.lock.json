@@ -1,13 +1,13 @@
 {
   "version": 1,
   "bundles": {
-    "goldens-1": {
-      "asset": "synthetic-text-1.tar.gz",
-      "sha256": "8652df5f1b4df4c9d27454dbf68c7f07474dd5cca077ec36a71f691f90c7acd2",
-      "bytes": 15308456
+    "goldens-2": {
+      "asset": "synthetic-paint-2.tar.gz",
+      "sha256": "6e5796ebd4decd513a71eece9809e5bc85122e1793232a83590ffe0ede6fa5bf",
+      "bytes": 15265144
     }
   },
   "goldens": {
-    "synthetic-text": "goldens-1"
+    "synthetic-paint": "goldens-2"
   }
 }

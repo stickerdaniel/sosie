@@ -949,3 +949,117 @@ fn unmirrored_punctuation_keeps_its_trim_side_in_rtl() {
         }
     }
 }
+
+fn mono_layout(
+    fonts: &Fonts,
+    parts: &[(WhiteSpace, &str)],
+    width: f32,
+) -> (TextLayout, Option<(f32, f32)>) {
+    let mono = |white_space| TextStyle {
+        family: FamilyList::parse(MONO),
+        size: 10.0,
+        line_height: 80.0,
+        tab_size: 1,
+        ..style(MONO, white_space)
+    };
+    let p = Paragraph {
+        width,
+        strut: mono(WhiteSpace::BreakSpaces),
+        overflow_wrap: OverflowWrap::Normal,
+        direction: Direction::Ltr,
+    };
+    let inlines: Vec<Inline> = parts
+        .iter()
+        .map(|&(ws, t)| Inline::Text {
+            text: t.to_string(),
+            style: mono(ws),
+        })
+        .collect();
+    let t = layout(fonts, &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+    let mut list = DisplayList::new(100.0, 400.0, hex("#ffffff"));
+    t.paint(&mut list, 0.0, 0.0);
+    let last = list
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Glyphs {
+                x,
+                baseline,
+                glyphs,
+                ..
+            } => glyphs.last().map(|g| (x + g.x, baseline + g.y)),
+            _ => None,
+        })
+        .next_back();
+    (t, last)
+}
+
+type MonoCase<'a> = (&'a [(WhiteSpace, &'a str)], f32, f32, Option<(f32, f32)>);
+
+fn assert_mono(cases: &[MonoCase]) {
+    let fonts = all_fonts();
+    for &(parts, width, height, last) in cases {
+        let (t, got) = mono_layout(&fonts, parts, width);
+        assert_eq!(t.height, height, "{parts:?}: height");
+        assert!(
+            match (got, last) {
+                (Some(g), Some(c)) => (g.0 - c.0).abs() <= 1.0 / 64.0 && g.1 == c.1,
+                (None, None) => true,
+                _ => false,
+            },
+            "{parts:?}: last glyph at {got:?}, Chromium {last:?}"
+        );
+    }
+}
+
+#[test]
+fn hanging_spans_keep_the_tab_before_the_break() {
+    use WhiteSpace::{BreakSpaces as B, PreWrap as W};
+    assert_mono(&[
+        (&[(B, "a\t"), (W, "  b")], 7.0, 240.0, Some((0.0, 202.0))),
+        (
+            &[(B, "a\t"), (W, " "), (W, " b")],
+            7.0,
+            240.0,
+            Some((0.0, 202.0)),
+        ),
+        (
+            &[(B, "a\t"), (W, " "), (W, "\tb")],
+            7.0,
+            240.0,
+            Some((0.0, 202.0)),
+        ),
+    ]);
+}
+
+#[test]
+fn a_preserved_newline_does_not_end_a_span_for_hanging() {
+    use WhiteSpace::{BreakSpaces as B, PreWrap as W};
+    assert_mono(&[
+        (&[(B, "a\t"), (W, " \n")], 7.0, 160.0, Some((0.0, 42.0))),
+        (&[(B, "a\t"), (W, " \nb")], 7.0, 240.0, Some((0.0, 202.0))),
+        (&[(B, "a\t"), (W, " ")], 7.0, 80.0, Some((0.0, 42.0))),
+    ]);
+}
+
+#[test]
+fn a_normal_space_at_a_line_start_collapses() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N, PreWrap as W};
+    assert_mono(&[
+        (&[(B, "a\t"), (N, " b")], 7.0, 160.0, Some((0.0, 122.0))),
+        (&[(W, "a\n"), (N, " b")], 13.0, 160.0, Some((0.0, 122.0))),
+        (&[(W, "a\n"), (N, " b")], 7.0, 160.0, Some((0.0, 122.0))),
+    ]);
+}
+
+#[test]
+fn a_normal_space_may_break_before_break_spaces_whitespace() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N};
+    assert_mono(&[(&[(N, "a "), (B, " b")], 13.0, 160.0, Some((6.0, 122.0)))]);
+    let (t, _) = mono_layout(&all_fonts(), &[(N, "a "), (B, " b")], 13.0);
+    assert!(
+        t.lines.iter().all(|l| l.advance <= 13.0),
+        "advances {:?}",
+        t.lines.iter().map(|l| l.advance).collect::<Vec<_>>()
+    );
+}

@@ -277,7 +277,7 @@ fn collapse(
                             c
                         }
                     } else {
-                        prev_collapsible_space = false;
+                        prev_collapsible_space = c == '\n';
                         c
                     };
                     let mut buf = [0u8; 4];
@@ -667,6 +667,7 @@ impl<'a> Para<'a> {
             let after_space = match pw {
                 WhiteSpace::BreakSpaces => blank(p),
                 WhiteSpace::PreWrap => (p.space && !q.space) || (blank(p) && blank(q) && qw != pw),
+                WhiteSpace::Normal => p.space && blank(q) && qw != pw,
                 _ => false,
             };
             if after_space {
@@ -728,11 +729,15 @@ impl<'a> Para<'a> {
                     }
                 }
             };
+            let after_tab = self.g[le - 1].tab;
             while le < he && self.g[le].hang {
                 let span = self.g[le].span;
-                let end = (le..he).find(|&k| self.g[k].span != span).unwrap_or(he);
-                let run = (le..end).take_while(|&k| self.g[k].hang).count();
-                if run < end - le && self.g[le - 1].tab {
+                let end = (le..self.g.len())
+                    .find(|&k| self.g[k].span != span)
+                    .unwrap_or(self.g.len());
+                let run = (le..end.min(he)).take_while(|&k| self.g[k].hang).count();
+                let collapsible = self.styles[span].ws == WhiteSpace::Normal;
+                if run < end - le && after_tab && !collapsible {
                     break;
                 }
                 le += run;

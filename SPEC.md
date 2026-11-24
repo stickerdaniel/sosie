@@ -27,10 +27,10 @@ This file states what the core guarantees, how each guarantee is checked, and th
 ## Text layout
 
 - Line breaking: ICU4X UAX #14 at `line-break: auto` (Normal strictness), with Blink's ASCII fast path.
-- Shaping: harfrust per run of face, size, script and direction. A span boundary splits a run only when padding sits at it, so equal adjacent spans keep kerning and Arabic joining. Paint splits each shaped run back into its spans. The CJK face gets the `chws` feature.
+- Shaping: harfrust per run of face, size, script and direction. A span boundary splits a run only when padding sits at it, so equal adjacent spans keep kerning and Arabic joining. Paint splits each shaped run back into its spans. A span piece starts at the leftmost layout position of all graphemes its glyph clusters cover, so an RTL ligature paints from its visual left edge. The CJK face gets the `chws` feature.
 - Sizes are truncated to 26.6 fixed point (`floor64(size * dpr)`). Advances come from that size, or from the strike ppem for a bitmap face.
 - Line fitting follows Blink: item widths rounded up to 1/64 px, a fit check with 1/64 px tolerance at spaces, a reshape at each candidate break, and an `overflow-wrap: anywhere` fallback.
-- `white-space`: `normal`, `pre`, `pre-wrap` and `break-spaces`, with `tab-size`. LF and CRLF end a preserved line. A preserved newline at the end of the text adds no line. `break-spaces` allows a break after every preserved space, `pre-wrap` after the last space of a run. A tab size of 0 gives a tab no advance.
+- `white-space`: `normal`, `pre`, `pre-wrap` and `break-spaces`, with `tab-size`. LF and CRLF end a preserved line. A preserved newline at the end of the text adds no line. `break-spaces` allows a break after every preserved space and tab, `pre-wrap` after the last space of a run. A tab size of 0 gives a tab no advance.
 - Font size: 0 to 256 CSS px, else `layout` returns `LayoutError::FontSize`. 256 px times the maximum dpr of 4 is 1,024 device px, the largest size the glyph raster draws. GitHub's largest text, 32 px, times D6's largest font scale, 2, is 64 px.
 - Vertical metrics: `above = round(ascent) + floor((line-height - ascent - descent) / 2)`. A line takes the maximum over the strut and every span on it. An inline box counts as its height above the baseline.
 - Bidi: unicode-bidi per paragraph. Runs on a line are placed in visual order. An RTL base paragraph aligns to the right edge.

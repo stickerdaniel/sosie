@@ -41,9 +41,18 @@ Adapted
 Skia
 
 paint/glyph.rs follows Skia's quadratic subdivision (cheap_distance and
-diff_to_shift in src/core/SkEdge.cpp), and its embedded mask gamma tables
-follow Skia's preblend gamma (src/core/SkMaskGamma.cpp) with contrast 0.2
-and gamma 1.2. Skia, https://skia.org, is distributed under this license:
+diff_to_shift in src/core/SkEdge.cpp). The code was ported from the Rust
+port of those two functions in tiny-skia 0.11.4, src/edge.rs (crates.io),
+and keeps their integer arithmetic with accuracy shift 2.
+
+The 8 mask gamma tables in paint/glyph.rs follow Skia's preblend gamma,
+apply_contrast and the correcting LUT of src/core/SkMaskGamma.cpp. They
+were generated in f32 with contrast 0.2, power gamma 1.2 and source
+luminance (i << 5) | (i << 2) | (i >> 1) for i in 0 to 7. The formula was
+written from SkMaskGamma.cpp; no Skia revision was recorded at the time.
+The unit test in paint/glyph.rs regenerates all 8 tables from it.
+
+Skia, https://skia.org, is distributed under this license:
 
   Copyright (c) 2011 Google Inc. All rights reserved.
 

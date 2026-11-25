@@ -166,6 +166,7 @@ impl TextLayout {
 }
 
 const OBJECT: char = '\u{fffc}';
+const RESHAPES_PER_LINE: usize = 4;
 
 #[derive(Clone)]
 struct Style {
@@ -181,6 +182,25 @@ struct Style {
     tab: u32,
     background: Option<InlineBackground>,
     atom: Option<(usize, InlineBox)>,
+}
+
+fn clamp_trim(a: f32, (lead, tail): &mut (f32, f32)) -> f32 {
+    let room = a.max(0.0);
+    if *lead + *tail > room {
+        let scale = room / (*lead + *tail);
+        *lead *= scale;
+        *tail *= scale;
+    }
+    (a - *lead - *tail).max(0.0)
+}
+
+struct Remeasure {
+    t: usize,
+    reshapes: usize,
+    width: f32,
+    raw: Vec<f32>,
+    safe: Vec<bool>,
+    pens: Vec<Pen>,
 }
 
 fn ceil64(w: f32) -> f32 {
@@ -212,6 +232,7 @@ struct G {
     pad_after: f32,
 }
 
+#[derive(Clone, Copy)]
 struct Pen {
     ls: usize,
     k: usize,
@@ -471,7 +492,19 @@ impl<'a> Para<'a> {
     }
 
     fn shape_range(&self, ls: usize, le: usize) -> (Vec<f32>, Vec<(f32, f32)>) {
+        let mut adv = self.raw_range(ls, le, None);
+        let mut trims = self.han_trim(ls, le);
+        for (a, trim) in adv.iter_mut().zip(&mut trims) {
+            *a = clamp_trim(*a, trim);
+        }
+        (adv, trims)
+    }
+
+    fn raw_range(&self, ls: usize, le: usize, mut safe: Option<&mut Vec<bool>>) -> Vec<f32> {
         let mut adv = vec![0.0f32; le - ls];
+        if let Some(safe) = safe.as_deref_mut() {
+            *safe = vec![true; le - ls + 1];
+        }
         let mut glyphs = Vec::new();
         for (a, b) in self.items(ls, le) {
             let first = &self.g[a];
@@ -484,6 +517,28 @@ impl<'a> Para<'a> {
             }
             let (ta, tb) = (first.start, self.g[b - 1].end);
             self.shape_into(a, b, &mut glyphs);
+            if let Some(safe) = safe.as_deref_mut() {
+                let mut starts: Vec<(usize, bool)> = glyphs
+                    .iter()
+                    .map(|gl| (gl.cluster as usize, gl.unsafe_to_break))
+                    .collect();
+                starts.sort_unstable_by_key(|&(c, _)| c);
+                starts.dedup_by(|next, kept| {
+                    let same = next.0 == kept.0;
+                    if same {
+                        kept.1 |= next.1;
+                    }
+                    same
+                });
+                let guessed = script::hb_script(first.script).is_none();
+                for k in a + 1..b {
+                    let at = self.g[k].start - ta;
+                    let clean = starts
+                        .binary_search_by_key(&at, |&(c, _)| c)
+                        .is_ok_and(|i| !starts[i].1);
+                    safe[k - ls] = clean && !guessed;
+                }
+            }
             let mut clusters: Vec<(usize, f32)> = Vec::new();
             let mut push = |gl: &shape::ShapedGlyph| match clusters.last_mut() {
                 Some((c, sum)) if *c == gl.cluster as usize => *sum += gl.adv,
@@ -515,22 +570,17 @@ impl<'a> Para<'a> {
                 }
             }
         }
-        let mut trims = self.han_trim(ls, le);
-        for (a, (lead, tail)) in adv.iter_mut().zip(&mut trims) {
-            let room = a.max(0.0);
-            if *lead + *tail > room {
-                let scale = room / (*lead + *tail);
-                *lead *= scale;
-                *tail *= scale;
-            }
-            *a = (*a - *lead - *tail).max(0.0);
-        }
-        (adv, trims)
+        adv
     }
 
     fn is_cjk(&self, k: usize) -> bool {
         let g = &self.g[k];
         !g.atom && self.fonts.expect(g.face).family() == Family::NotoSansCjk
+    }
+
+    fn last_trim(&self, ls: usize, k: usize) -> (f32, f32) {
+        let from = k.saturating_sub(1).max(ls);
+        self.han_trim(from, k + 1)[k - from]
     }
 
     fn han_trim(&self, ls: usize, le: usize) -> Vec<(f32, f32)> {
@@ -606,6 +656,11 @@ impl<'a> Para<'a> {
     }
 
     fn step(&self, pen: &mut Pen, adv: &[f32]) -> (f32, f32) {
+        let ls = pen.ls;
+        self.step_by(pen, |k| adv[k - ls])
+    }
+
+    fn step_by(&self, pen: &mut Pen, adv: impl Fn(usize) -> f32) -> (f32, f32) {
         let k = pen.k;
         if k > pen.ls && self.item_break[k] {
             pen.total += ceil64(pen.item);
@@ -619,7 +674,7 @@ impl<'a> Para<'a> {
         let a = if g.tab {
             self.tab_advance(g.span, pen.total + pen.item)
         } else {
-            adv[k - pen.ls]
+            adv(k)
         };
         let x0 = pen.total + pen.item;
         pen.item += a;
@@ -687,6 +742,61 @@ impl<'a> Para<'a> {
         }
     }
 
+    fn remeasure(&self, ls: usize, le: usize, memo: &mut Option<Remeasure>) -> f32 {
+        let t = self.trail(ls, le);
+        if t == ls {
+            return 0.0;
+        }
+        if let Some(r) = memo
+            .as_ref()
+            .filter(|r| t <= r.t && (t == r.t || r.safe[t - ls] || r.reshapes >= RESHAPES_PER_LINE))
+        {
+            if t == r.t {
+                return r.width;
+            }
+            let k = t - 1;
+            let mut trim = self.last_trim(ls, k);
+            let a = clamp_trim(r.raw[k - ls], &mut trim);
+            let mut pen = r.pens[k - ls];
+            self.step_by(&mut pen, |_| a);
+            return self.trimmed_width(pen.width(), ls, t);
+        }
+        let mut safe = Vec::new();
+        let raw = self.raw_range(ls, t, Some(&mut safe));
+        let mut trims = self.han_trim(ls, t);
+        let adv: Vec<f32> = raw
+            .iter()
+            .zip(&mut trims)
+            .map(|(&a, trim)| clamp_trim(a, trim))
+            .collect();
+        let mut pen = Pen::new(ls);
+        let mut pens = Vec::with_capacity(t - ls + 1);
+        pens.push(pen);
+        for _ in ls..t {
+            self.step(&mut pen, &adv);
+            pens.push(pen);
+        }
+        let width = self.trimmed_width(pen.width(), ls, t);
+        let reshapes = memo.as_ref().map_or(0, |r| r.reshapes + 1);
+        *memo = Some(Remeasure {
+            t,
+            reshapes,
+            width,
+            raw,
+            safe,
+            pens,
+        });
+        width
+    }
+
+    fn trimmed_width(&self, w: f32, ls: usize, t: usize) -> f32 {
+        if w > self.avail && t > ls {
+            w - self.end_trim(t)
+        } else {
+            w
+        }
+    }
+
     fn breaks(&self) -> Vec<(usize, usize)> {
         let n = self.g.len();
         let mut out = Vec::new();
@@ -720,6 +830,7 @@ impl<'a> Para<'a> {
                     .binary_search_by_key(&(a + o), |g| g.start)
                     .ok()
                     .map(|i| hs + i)
+                    .filter(|&k| k == hs || !self.g[k - 1].cr)
             })
             .collect();
         for k in hs + 1..he {
@@ -733,7 +844,7 @@ impl<'a> Para<'a> {
                 _ => false,
             };
             let before_pre_space = self.break_before_spaces
-                && qw == WhiteSpace::Pre
+                && matches!(qw, WhiteSpace::Pre | WhiteSpace::BreakSpaces)
                 && pw != WhiteSpace::Pre
                 && blank(q)
                 && !blank(p)
@@ -766,10 +877,11 @@ impl<'a> Para<'a> {
                 }
             }
             let mut chosen = None;
+            let mut memo = None;
             if let Some(mut k) = best {
                 loop {
                     let le = cand(k);
-                    if fits(self.fit_width(ls, le), self.avail) {
+                    if fits(self.remeasure(ls, le, &mut memo), self.avail) {
                         chosen = Some(le);
                         break;
                     }
@@ -791,7 +903,9 @@ impl<'a> Para<'a> {
                     }
                     loop {
                         let allowed = g == he || wraps(g);
-                        if allowed && (fits(self.fit_width(ls, g), self.avail) || g <= ls + 1) {
+                        if allowed
+                            && (g <= ls + 1 || fits(self.remeasure(ls, g, &mut memo), self.avail))
+                        {
                             break g;
                         }
                         if g <= ls + 1 {
@@ -806,6 +920,12 @@ impl<'a> Para<'a> {
                 && self.styles[self.g[le - 1].span].ws == WhiteSpace::Pre
                 && !fits(self.fit_width(ls, le), self.avail);
             let after_tab = self.g[le - 1].tab;
+            let spilled = self.g[le - 1].space
+                && self.styles[self.g[le - 1].span].ws == WhiteSpace::BreakSpaces
+                && !fits(self.fit_width(ls, le), self.avail);
+            let line_end = le;
+            let mut head_fits = None;
+            let mut split = false;
             while le < he && self.g[le].hang {
                 let span = self.g[le].span;
                 let end = self.span_end[span].min(he);
@@ -817,7 +937,21 @@ impl<'a> Para<'a> {
                     ink += 1;
                 }
                 let held = stop < end || (ink == he && he < self.g.len());
-                if !collapsible && held && (pre_overflow || after_tab) {
+                let merged = stop == he && self.g.get(he).is_some_and(|g| g.span == span);
+                split |= pre_overflow && !collapsible && held && stop == end;
+                if !collapsible
+                    && held
+                    && (pre_overflow && (stop < end || merged)
+                        || spilled && merged
+                        || after_tab
+                            && (self.g[line_end - 1].hang
+                                || *head_fits.get_or_insert_with(|| {
+                                    fits(
+                                        self.fit_width(ls, self.blank_from(ls, line_end)),
+                                        self.avail,
+                                    )
+                                })))
+                {
                     break;
                 }
                 le += run;
@@ -826,11 +960,17 @@ impl<'a> Para<'a> {
             let t = self.trail(ls, le);
             let last = &self.g[t.max(ls + 1) - 1];
             if le == he
-                && he < self.g.len()
-                && t > ls
-                && (last.space || last.tab)
-                && self.styles[last.span].ws == WhiteSpace::BreakSpaces
-                && !fits(self.fit_width(ls, le), self.avail)
+                && (split
+                    || he < self.g.len()
+                        && t > ls
+                        && (last.space || last.tab)
+                        && self.styles[last.span].ws == WhiteSpace::BreakSpaces
+                        && (last.span != self.g[he].span
+                            || ls == hs
+                                && last.space
+                                && self.fit_width(ls, self.blank_from(ls, t)) == 0.0)
+                        && !fits(self.fit_width(ls, le), self.avail)
+                        && fits(self.fit_width(ls, self.blank_from(ls, t)), self.avail))
             {
                 out.push((he, he));
             }
@@ -838,7 +978,18 @@ impl<'a> Para<'a> {
         }
     }
 
-    fn line(&self, ls: usize, le: usize, top: f32) -> Line {
+    fn blank_from(&self, ls: usize, t: usize) -> usize {
+        let mut k = t;
+        while k > ls && {
+            let g = &self.g[k - 1];
+            (g.space || g.tab) && self.styles[g.span].ws == WhiteSpace::BreakSpaces
+        } {
+            k -= 1;
+        }
+        k
+    }
+
+    fn line(&self, ls: usize, le: usize, lf: bool, top: f32) -> Line {
         let t = self.trail(ls, le);
         let (adv, mut trims) = self.shape_range(ls, t);
         let (full, mut pos) = self.walk(ls, t, &adv);
@@ -866,7 +1017,7 @@ impl<'a> Para<'a> {
         };
         let (mut above, mut below) = self.strut;
         let mut prev = None;
-        for k in ls..le {
+        for k in ls..le + usize::from(lf) {
             let span = self.g[k].span;
             if prev == Some(span) {
                 continue;
@@ -932,8 +1083,10 @@ impl<'a> Para<'a> {
                     if self.g[ks.start].span != span {
                         break;
                     }
-                    for k in ks {
-                        start = start.min(vpos[k - ls].0);
+                    if j == i || glyphs[j - 1].cluster != glyphs[j].cluster {
+                        for k in ks {
+                            start = start.min(vpos[k - ls].0);
+                        }
                     }
                     j += 1;
                 }
@@ -1159,8 +1312,10 @@ pub fn layout(
     let p = Para::new(fonts, para, inlines);
     let mut lines = Vec::new();
     let mut top = 0.0f32;
-    for (ls, le) in p.breaks() {
-        let line = p.line(ls, le, top);
+    let breaks = p.breaks();
+    for (i, &(ls, le)) in breaks.iter().enumerate() {
+        let lf = p.g.get(le).is_some_and(|g| g.nl) && breaks.get(i + 1) != Some(&(le, le));
+        let line = p.line(ls, le, lf, top);
         top += line.height;
         lines.push(line);
     }

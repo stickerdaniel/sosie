@@ -1230,24 +1230,36 @@ fn mono_run(
     parts: &[(WhiteSpace, &str)],
     width: f32,
 ) -> (f32, Placed) {
-    let mono = |white_space| TextStyle {
+    let parts: Vec<_> = parts.iter().map(|&(ws, t)| (ws, t, 80.0)).collect();
+    mono_spans((strut, 80.0), overflow_wrap, direction, size, &parts, width)
+}
+
+fn mono_spans(
+    strut: (WhiteSpace, f32),
+    overflow_wrap: OverflowWrap,
+    direction: Direction,
+    size: f32,
+    parts: &[(WhiteSpace, &str, f32)],
+    width: f32,
+) -> (f32, Placed) {
+    let mono = |white_space, line_height| TextStyle {
         family: FamilyList::parse(MONO),
         size,
-        line_height: 80.0,
+        line_height,
         tab_size: 1,
         ..style(MONO, white_space)
     };
     let p = Paragraph {
         width,
-        strut: mono(strut),
+        strut: mono(strut.0, strut.1),
         overflow_wrap,
         direction,
     };
     let inlines: Vec<Inline> = parts
         .iter()
-        .map(|&(ws, t)| Inline::Text {
+        .map(|&(ws, t, line_height)| Inline::Text {
             text: t.to_string(),
-            style: mono(ws),
+            style: mono(ws, line_height),
         })
         .collect();
     let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
@@ -1683,6 +1695,252 @@ fn whitespace_before_a_forced_break_in_the_next_span_does_not_hang() {
             }
         }
     }
+    type Spans = &'static [(WhiteSpace, &'static str, f32)];
+    type Mixed = ((WhiteSpace, f32), OverflowWrap, f32, Spans, (f32, f32));
+    let mixed: [Mixed; 27] = [
+        (
+            (W, 80.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[(N, "a", 80.0), (B, " ", 80.0), (W, "\nc", 80.0)],
+            (160.0, 122.0),
+        ),
+        (
+            (W, 80.0),
+            OverflowWrap::Normal,
+            7.0,
+            &[(N, "a", 80.0), (B, " ", 80.0), (W, "\nc", 80.0)],
+            (240.0, 202.0),
+        ),
+        (
+            (N, 80.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[(N, "a", 80.0), (B, " ", 80.0), (W, "\nc", 80.0)],
+            (320.0, 282.0),
+        ),
+        (
+            (P, 80.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[(N, "a", 80.0), (B, " ", 80.0), (W, "\nc", 80.0)],
+            (320.0, 282.0),
+        ),
+        (
+            (B, 80.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[(N, "a", 80.0), (B, " ", 80.0), (W, "\nc", 80.0)],
+            (160.0, 122.0),
+        ),
+        (
+            (W, 80.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[(N, "a", 80.0), (B, " ", 80.0), (W, "c", 80.0)],
+            (160.0, 122.0),
+        ),
+        (
+            (N, 80.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[
+                (B, "a\t", 80.0),
+                (W, "\t", 80.0),
+                (W, " ", 80.0),
+                (N, " ", 80.0),
+                (W, "\n\nc", 80.0),
+            ],
+            (240.0, 202.0),
+        ),
+        (
+            (N, 80.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[
+                (B, "a\t", 80.0),
+                (W, " ", 80.0),
+                (N, " ", 80.0),
+                (W, "\nc", 80.0),
+            ],
+            (160.0, 122.0),
+        ),
+        (
+            (N, 80.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[(B, "a\t", 80.0), (W, " ", 80.0), (W, "\nc", 80.0)],
+            (160.0, 122.0),
+        ),
+        (
+            (N, 80.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[
+                (B, "a\t", 80.0),
+                (W, " ", 80.0),
+                (N, "", 80.0),
+                (W, "\nc", 80.0),
+            ],
+            (160.0, 122.0),
+        ),
+        (
+            (N, 80.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[
+                (B, "a\t", 80.0),
+                (W, "\t", 80.0),
+                (W, " ", 80.0),
+                (N, " ", 80.0),
+                (W, "\nc", 80.0),
+            ],
+            (160.0, 122.0),
+        ),
+        (
+            (N, 80.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[(B, "a\t", 80.0), (N, " ", 80.0), (W, "\nc", 80.0)],
+            (160.0, 122.0),
+        ),
+        (
+            (N, 80.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[
+                (B, "a\t", 80.0),
+                (W, " ", 80.0),
+                (P, " ", 80.0),
+                (W, "\nc", 80.0),
+            ],
+            (240.0, 202.0),
+        ),
+        (
+            (N, 16.0),
+            OverflowWrap::Anywhere,
+            1.0,
+            &[
+                (P, "ab", 80.0),
+                (W, " ", 80.0),
+                (B, " ", 80.0),
+                (W, "\nc", 80.0),
+            ],
+            (320.0, 282.0),
+        ),
+        (
+            (N, 16.0),
+            OverflowWrap::Anywhere,
+            1.0,
+            &[(P, "ab", 80.0), (B, " ", 80.0), (W, "\nc", 80.0)],
+            (320.0, 282.0),
+        ),
+        (
+            (N, 16.0),
+            OverflowWrap::Anywhere,
+            1.0,
+            &[(P, "ab", 80.0), (W, " ", 80.0), (B, " \nc", 80.0)],
+            (240.0, 202.0),
+        ),
+        (
+            (N, 80.0),
+            OverflowWrap::Anywhere,
+            1.0,
+            &[
+                (P, "ab", 80.0),
+                (W, " ", 80.0),
+                (B, " ", 80.0),
+                (W, "\nc", 80.0),
+            ],
+            (320.0, 282.0),
+        ),
+        (
+            (N, 16.0),
+            OverflowWrap::Anywhere,
+            1.0,
+            &[(B, " \nc", 80.0)],
+            (240.0, 202.0),
+        ),
+        (
+            (N, 16.0),
+            OverflowWrap::Anywhere,
+            1.0,
+            &[(B, " ", 80.0), (W, "\nc", 80.0)],
+            (240.0, 202.0),
+        ),
+        (
+            (N, 16.0),
+            OverflowWrap::Anywhere,
+            1.0,
+            &[(B, " ", 80.0), (W, "\nc", 120.0)],
+            (320.0, 262.0),
+        ),
+        (
+            (N, 0.0),
+            OverflowWrap::Anywhere,
+            1.0,
+            &[
+                (P, "ab", 16.0),
+                (W, " ", 16.0),
+                (N, " ", 16.0),
+                (W, "\nc", 0.0),
+            ],
+            (16.0, 18.0),
+        ),
+        (
+            (N, 0.0),
+            OverflowWrap::Anywhere,
+            1.0,
+            &[
+                (P, "ab", 16.0),
+                (W, " ", 16.0),
+                (N, " ", 16.0),
+                (W, "\nc", 16.0),
+            ],
+            (48.0, 42.0),
+        ),
+        (
+            (N, 16.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[(W, " ", 16.0), (W, "\nc", 80.0)],
+            (160.0, 122.0),
+        ),
+        (
+            (N, 16.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[(P, "ab", 16.0), (B, " \nc", 16.0)],
+            (32.0, 26.0),
+        ),
+        (
+            (N, 80.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[(B, " ", 80.0), (W, "\rc", 80.0)],
+            (160.0, 122.0),
+        ),
+        (
+            (N, 16.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[(N, "a", 16.0), (B, " ", 16.0), (W, " \nc", 80.0)],
+            (192.0, 154.0),
+        ),
+        (
+            (N, 16.0),
+            OverflowWrap::Anywhere,
+            1.0,
+            &[(P, "ab", 16.0), (W, " \nc", 80.0)],
+            (176.0, 138.0),
+        ),
+    ];
+    for (strut, overflow_wrap, width, parts, (height, baseline)) in mixed {
+        let (h, placed) = mono_spans(strut, overflow_wrap, Direction::Ltr, 10.0, parts, width);
+        let what = format!("{parts:?} in {strut:?} {overflow_wrap:?} at width {width}");
+        assert_eq!(h, height, "{what}: height");
+        assert_at(&what, mono_at(&placed, "c"), (0.0, baseline));
+    }
 }
 
 #[test]
@@ -1931,6 +2189,25 @@ fn trimmed_cjk_punctuation_never_moves_the_pen_backwards() {
     }
 }
 
+fn assert_linear(
+    what: &str,
+    mut witness: impl FnMut() -> std::time::Duration,
+    mut control: impl FnMut() -> std::time::Duration,
+) {
+    let mut fastest = (std::time::Duration::MAX, std::time::Duration::MAX);
+    for _ in 0..5 {
+        fastest.1 = fastest.1.min(control());
+        fastest.0 = fastest.0.min(witness());
+        if fastest.0 < fastest.1 * 4 {
+            return;
+        }
+    }
+    panic!(
+        "{what} took at best {:?} against its linear control's {:?}",
+        fastest.0, fastest.1
+    );
+}
+
 #[test]
 fn spread_negative_trims_and_many_spans_cost_like_linear_controls() {
     let st = TextStyle {
@@ -2006,13 +2283,87 @@ fn spread_negative_trims_and_many_spans_cost_like_linear_controls() {
             40_000,
         ),
     ] {
-        let mut runs = Vec::new();
-        let linear = (0..3).any(|_| {
-            let base = timed(&control.0, strut, width, control.1);
-            let elapsed = timed(&inlines, strut, width, lines);
-            runs.push((elapsed, base));
-            elapsed < base * 4
-        });
-        assert!(linear, "{what} against its linear control took {runs:?}");
+        assert_linear(
+            what,
+            || timed(&inlines, strut, width, lines),
+            || timed(&control.0, strut, width, control.1),
+        );
+    }
+}
+
+#[test]
+fn unsafe_shaping_cuts_cost_like_linear_controls() {
+    let st = TextStyle {
+        family: FamilyList::parse(SANS),
+        size: 10.0,
+        line_height: 16.0,
+        ..style(SANS, WhiteSpace::Normal)
+    };
+    let timed = |text: &str, overflow_wrap, width, lines| {
+        let p = Paragraph {
+            width,
+            strut: st.clone(),
+            overflow_wrap,
+            direction: Direction::Ltr,
+        };
+        let inlines = [Inline::Text {
+            text: text.to_string(),
+            style: st.clone(),
+        }];
+        let start = std::time::Instant::now();
+        let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+        let elapsed = start.elapsed();
+        assert_eq!(t.lines.len(), lines, "{text:?}");
+        elapsed
+    };
+    for (what, unit, count, ends, control, overflow_wrap, width, lines) in [
+        (
+            "a kerned pair across 4,000 word joiners",
+            "\u{2060}",
+            4_000,
+            ("A", "V"),
+            "I",
+            OverflowWrap::Anywhere,
+            6.1,
+            2,
+        ),
+        (
+            "a kerned pair across 4,000 break opportunities",
+            "\u{200b}\u{2060}",
+            4_000,
+            ("A", "V"),
+            "I",
+            OverflowWrap::Normal,
+            6.1,
+            2,
+        ),
+        (
+            "a kerned pair across 4,000 marks on word joiners",
+            "\u{2060}\u{301}",
+            4_000,
+            ("A", "V"),
+            "I",
+            OverflowWrap::Anywhere,
+            6.1,
+            2,
+        ),
+        (
+            "a ligature across 64,000 word joiners",
+            "\u{2060}",
+            64_000,
+            ("f", "i"),
+            "x",
+            OverflowWrap::Anywhere,
+            400.0,
+            1,
+        ),
+    ] {
+        let text = format!("{}{}{}", ends.0, unit.repeat(count), ends.1);
+        let base = format!("{}{}{control}", ends.0, unit.repeat(count));
+        assert_linear(
+            what,
+            || timed(&text, overflow_wrap, width, lines),
+            || timed(&base, overflow_wrap, width, lines),
+        );
     }
 }

@@ -15,6 +15,7 @@ pub struct ShapedGlyph {
     pub adv: f32,
     pub dx: f32,
     pub dy: f32,
+    pub unsafe_to_break: bool,
 }
 
 thread_local! {
@@ -198,6 +199,7 @@ pub fn shape(
                 adv: (own_fixed + adjust_fixed) as f32 / 65536.0,
                 dx: hb_scale(pos.x_offset as i64) as f32 / 65536.0,
                 dy: hb_scale(pos.y_offset as i64) as f32 / 65536.0,
+                unsafe_to_break: info.unsafe_to_break(),
             });
         }
     }

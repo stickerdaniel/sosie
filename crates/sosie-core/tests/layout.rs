@@ -1213,3 +1213,248 @@ fn overflow_wrap_anywhere_does_not_break_inside_pre() {
         );
     }
 }
+
+type Placed = Vec<(u32, f32, f32)>;
+
+fn mono_run(
+    strut: WhiteSpace,
+    overflow_wrap: OverflowWrap,
+    direction: Direction,
+    size: f32,
+    parts: &[(WhiteSpace, &str)],
+    width: f32,
+) -> (f32, Placed) {
+    let mono = |white_space| TextStyle {
+        family: FamilyList::parse(MONO),
+        size,
+        line_height: 80.0,
+        tab_size: 1,
+        ..style(MONO, white_space)
+    };
+    let p = Paragraph {
+        width,
+        strut: mono(strut),
+        overflow_wrap,
+        direction,
+    };
+    let inlines: Vec<Inline> = parts
+        .iter()
+        .map(|&(ws, t)| Inline::Text {
+            text: t.to_string(),
+            style: mono(ws),
+        })
+        .collect();
+    let t = layout(&all_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+    let mut list = DisplayList::new(100.0, 400.0, hex("#ffffff"));
+    t.paint(&mut list, 0.0, 0.0);
+    let placed = list
+        .items
+        .iter()
+        .flat_map(|i| match i {
+            Item::Glyphs {
+                x,
+                baseline,
+                glyphs,
+                ..
+            } => glyphs
+                .iter()
+                .map(|g| (g.id, x + g.x, baseline + g.y))
+                .collect(),
+            _ => Vec::new(),
+        })
+        .collect();
+    (t.height, placed)
+}
+
+fn mono_at(placed: &Placed, c: &str) -> (f32, f32) {
+    let (_, glyphs) = mono_run(
+        WhiteSpace::Pre,
+        OverflowWrap::Normal,
+        Direction::Ltr,
+        10.0,
+        &[(WhiteSpace::Pre, c)],
+        100.0,
+    );
+    let id = glyphs[0].0;
+    let found: Vec<_> = placed.iter().filter(|g| g.0 == id).collect();
+    assert_eq!(
+        found.len(),
+        1,
+        "{c} painted {} times in {placed:?}",
+        found.len()
+    );
+    (found[0].1, found[0].2)
+}
+
+fn assert_at(what: &str, got: (f32, f32), chromium: (f32, f32)) {
+    assert!(
+        (got.0 - chromium.0).abs() <= 1.0 / 64.0 && got.1 == chromium.1,
+        "{what}: at {got:?}, Chromium {chromium:?}"
+    );
+}
+
+#[test]
+fn a_pre_spans_leading_whitespace_may_start_a_line() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
+    for (strut, lead, height, b) in [
+        (N, " b", 160.0, (6.0, 122.0)),
+        (P, " b", 160.0, (6.0, 122.0)),
+        (N, "\tb", 160.0, (6.015625, 122.0)),
+        (W, " b", 80.0, (12.015625, 42.0)),
+        (B, " b", 80.0, (12.015625, 42.0)),
+    ] {
+        let parts = [(N, "a"), (P, lead)];
+        let (h, placed) = mono_run(
+            strut,
+            OverflowWrap::Normal,
+            Direction::Ltr,
+            10.0,
+            &parts,
+            13.0,
+        );
+        let what = format!("{parts:?} in {strut:?}");
+        assert_eq!(h, height, "{what}: height");
+        assert_at(&what, mono_at(&placed, "b"), b);
+    }
+}
+
+#[test]
+fn whitespace_after_an_overflowing_pre_line_starts_the_next_line() {
+    use WhiteSpace::{Normal as N, Pre as P, PreWrap as W};
+    for (strut, overflow_wrap, parts, width, height, last) in [
+        (
+            N,
+            OverflowWrap::Anywhere,
+            [(P, "ab"), (W, " c")],
+            7.0,
+            240.0,
+            ("c", (0.0, 202.0)),
+        ),
+        (
+            N,
+            OverflowWrap::Anywhere,
+            [(P, "abcd"), (W, " e")],
+            13.0,
+            160.0,
+            ("e", (6.0, 122.0)),
+        ),
+        (
+            P,
+            OverflowWrap::Anywhere,
+            [(P, "ab"), (W, " c")],
+            7.0,
+            160.0,
+            ("c", (0.0, 122.0)),
+        ),
+        (
+            N,
+            OverflowWrap::Normal,
+            [(P, "abcd"), (W, " e")],
+            13.0,
+            160.0,
+            ("e", (0.0, 122.0)),
+        ),
+    ] {
+        let (h, placed) = mono_run(strut, overflow_wrap, Direction::Ltr, 10.0, &parts, width);
+        let what = format!("{parts:?} in {strut:?}, {overflow_wrap:?}");
+        assert_eq!(h, height, "{what}: height");
+        assert_at(&what, mono_at(&placed, last.0), last.1);
+    }
+}
+
+#[test]
+fn overflow_wrap_anywhere_fits_a_sixty_fourth_past_the_width() {
+    use WhiteSpace::Normal as N;
+    for (width, height) in [(19.203125, 240.0), (19.1875, 240.0), (19.171875, 480.0)] {
+        let (h, _) = mono_run(
+            N,
+            OverflowWrap::Anywhere,
+            Direction::Ltr,
+            16.0,
+            &[(N, "abcdef")],
+            width,
+        );
+        assert_eq!(h, height, "width {width}: height");
+    }
+}
+
+#[test]
+fn a_tab_takes_the_paragraph_direction_in_rtl() {
+    use WhiteSpace::{Normal as N, Pre as P, PreWrap as W};
+    for (parts, width, a, b) in [
+        (
+            &[(P, "a\tb")][..],
+            100.0,
+            (93.984375, 42.0),
+            (81.96875, 42.0),
+        ),
+        (
+            &[(W, "a\tb")][..],
+            100.0,
+            (93.984375, 42.0),
+            (81.96875, 42.0),
+        ),
+        (
+            &[(N, "a"), (P, "\tb")][..],
+            100.0,
+            (93.984375, 42.0),
+            (81.96875, 42.0),
+        ),
+        (
+            &[(P, "a\t"), (N, " b")][..],
+            13.0,
+            (6.984375, 42.0),
+            (6.984375, 122.0),
+        ),
+    ] {
+        let (_, placed) = mono_run(N, OverflowWrap::Normal, Direction::Rtl, 10.0, parts, width);
+        let what = format!("{parts:?}");
+        assert_at(&what, mono_at(&placed, "a"), a);
+        assert_at(&what, mono_at(&placed, "b"), b);
+    }
+}
+
+#[test]
+fn a_lone_carriage_return_paints_nothing_and_takes_no_width() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
+    for (overflow_wrap, parts, width, height, b) in [
+        (
+            OverflowWrap::Normal,
+            &[(W, "a\r"), (N, "\nb")][..],
+            100.0,
+            80.0,
+            (12.015625, 42.0),
+        ),
+        (
+            OverflowWrap::Anywhere,
+            &[(W, "a\r"), (N, "\nb")][..],
+            7.0,
+            160.0,
+            (0.0, 122.0),
+        ),
+        (
+            OverflowWrap::Normal,
+            &[(P, "a\rb")][..],
+            100.0,
+            80.0,
+            (6.015625, 42.0),
+        ),
+    ] {
+        let (h, placed) = mono_run(B, overflow_wrap, Direction::Ltr, 10.0, parts, width);
+        let what = format!("{parts:?}, {overflow_wrap:?}");
+        assert_eq!(h, height, "{what}: height");
+        assert_at(&what, mono_at(&placed, "b"), b);
+        let blank = mono_run(
+            P,
+            OverflowWrap::Normal,
+            Direction::Ltr,
+            10.0,
+            &[(P, " ")],
+            100.0,
+        )
+        .1[0]
+            .0;
+        let inked = placed.iter().filter(|g| g.0 != blank).count();
+        assert_eq!(inked, 2, "{what}: painted glyphs {placed:?}");
+    }
+}

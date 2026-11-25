@@ -205,6 +205,7 @@ struct G {
     space: bool,
     tab: bool,
     nl: bool,
+    cr: bool,
     hang: bool,
     atom: bool,
     pad_before: f32,
@@ -220,6 +221,7 @@ struct Para<'a> {
     item_break: Vec<bool>,
     shape_break: Vec<bool>,
     wrap: bool,
+    break_before_spaces: bool,
     anywhere: bool,
     avail: f32,
     rtl_base: bool,
@@ -318,6 +320,12 @@ impl<'a> Para<'a> {
         };
         let bidi = BidiInfo::new(&text, base);
         let rtl_base = bidi.paragraphs.first().is_some_and(|p| p.level.is_rtl());
+        let mut levels = bidi.levels.clone();
+        for para in &bidi.paragraphs {
+            let range = para.range.clone();
+            levels[range.clone()]
+                .copy_from_slice(&bidi.reordered_levels(para, range.clone())[range]);
+        }
         let scripts = script::resolve(&text);
         let gbs = linebreak::grapheme_boundaries(&text);
         let mut g = Vec::new();
@@ -329,6 +337,7 @@ impl<'a> Para<'a> {
             let space = c == " ";
             let tab = c == "\t";
             let nl = c == "\n" || c == "\r\n";
+            let cr = c == "\r";
             let atom = st.atom.is_some();
             let hang = match st.ws {
                 WhiteSpace::Normal => space,
@@ -340,16 +349,17 @@ impl<'a> Para<'a> {
                 start: a,
                 end: b,
                 span,
-                face: if space || tab || nl || atom {
+                face: if space || tab || nl || cr || atom {
                     st.primary
                 } else {
                     fonts.select(st.primary, &st.family, st.weight, st.italic, c)
                 },
-                level: bidi.levels[a].number(),
+                level: levels[a].number(),
                 script: scripts[a],
                 space,
                 tab,
                 nl,
+                cr,
                 hang,
                 atom,
                 pad_before: if a == ss { st.pad } else { 0.0 },
@@ -361,7 +371,7 @@ impl<'a> Para<'a> {
         let mut shape_break = vec![false; n];
         for i in 1..n {
             let (p, q) = (&g[i - 1], &g[i]);
-            let hard = p.level != q.level || p.tab || q.tab || p.nl || q.nl;
+            let hard = p.level != q.level || p.tab || q.tab || p.nl || q.nl || p.cr || q.cr;
             item_break[i] = hard || p.span != q.span;
             shape_break[i] = hard
                 || p.atom
@@ -388,6 +398,10 @@ impl<'a> Para<'a> {
             item_break,
             shape_break,
             wrap: para.strut.white_space != WhiteSpace::Pre,
+            break_before_spaces: matches!(
+                para.strut.white_space,
+                WhiteSpace::Normal | WhiteSpace::Pre
+            ),
             anywhere: para.overflow_wrap == OverflowWrap::Anywhere,
             avail: para.width,
             rtl_base,
@@ -432,7 +446,7 @@ impl<'a> Para<'a> {
         let mut glyphs = Vec::new();
         for (a, b) in self.items(ls, le) {
             let first = &self.g[a];
-            if first.tab || first.nl {
+            if first.tab || first.nl || first.cr {
                 continue;
             }
             if let Some((_, bx)) = self.styles[first.span].atom {
@@ -666,7 +680,13 @@ impl<'a> Para<'a> {
                 WhiteSpace::Normal => p.space && blank(q) && qw != pw,
                 _ => false,
             };
-            if after_space {
+            let before_pre_space = self.break_before_spaces
+                && qw == WhiteSpace::Pre
+                && pw != WhiteSpace::Pre
+                && blank(q)
+                && !blank(p)
+                && p.span != q.span;
+            if after_space || before_pre_space {
                 opps.push(k);
             }
         }
@@ -712,7 +732,7 @@ impl<'a> Para<'a> {
                     let mut g = ls + 1;
                     while g < he {
                         let (_, pos) = self.walk(ls, g + 1, &self.adv[ls..g + 1]);
-                        if pos.last().is_some_and(|p| floor64(p.1) <= self.avail) {
+                        if pos.last().is_some_and(|p| fits(p.1, self.avail)) {
                             g += 1;
                         } else {
                             break;
@@ -731,6 +751,10 @@ impl<'a> Para<'a> {
                     }
                 }
             };
+            let pre_overflow = chosen.is_none()
+                && self.anywhere
+                && self.styles[self.g[le - 1].span].ws == WhiteSpace::Pre
+                && !fits(self.fit_width(ls, le, true), self.avail);
             let after_tab = self.g[le - 1].tab;
             while le < he && self.g[le].hang {
                 let span = self.g[le].span;
@@ -739,7 +763,7 @@ impl<'a> Para<'a> {
                     .unwrap_or(self.g.len());
                 let run = (le..end.min(he)).take_while(|&k| self.g[k].hang).count();
                 let collapsible = self.styles[span].ws == WhiteSpace::Normal;
-                if run < end - le && after_tab && !collapsible {
+                if !collapsible && (pre_overflow || (run < end - le && after_tab)) {
                     break;
                 }
                 le += run;
@@ -761,7 +785,7 @@ impl<'a> Para<'a> {
         }
         let vpos = self.visual(ls, t, &pos);
         let ink: Vec<usize> = (ls..t)
-            .filter(|&k| !self.g[k].space && !self.g[k].tab)
+            .filter(|&k| !self.g[k].space && !self.g[k].tab && !self.g[k].cr)
             .collect();
         let ink_width = match (ink.first(), ink.last()) {
             (Some(&a), Some(&b)) => pos[b - ls].1 - pos[a - ls].0,
@@ -794,7 +818,7 @@ impl<'a> Para<'a> {
         let mut glyphs = Vec::new();
         for (a, b) in self.items(ls, t) {
             let first = &self.g[a];
-            if first.tab || first.nl {
+            if first.tab || first.nl || first.cr {
                 continue;
             }
             let st = &self.styles[first.span];
@@ -1035,7 +1059,7 @@ pub fn layout(
     }
     let synthetic_bold = p.g.iter().any(|g| {
         let face = fonts.expect(g.face);
-        !(g.space || g.tab || g.nl || g.atom)
+        !(g.space || g.tab || g.nl || g.cr || g.atom)
             && p.styles[g.span].weight >= 600
             && face.weight() < 600
             && !face.is_emoji()

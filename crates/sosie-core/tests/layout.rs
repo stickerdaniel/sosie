@@ -1717,7 +1717,7 @@ fn whitespace_before_a_forced_break_in_the_next_span_does_not_hang() {
     }
     type Spans = &'static [(WhiteSpace, &'static str, f32)];
     type Mixed = ((WhiteSpace, f32), OverflowWrap, f32, Spans, (f32, f32));
-    let mixed: [Mixed; 27] = [
+    let mixed: [Mixed; 28] = [
         (
             (W, 80.0),
             OverflowWrap::Normal,
@@ -1954,6 +1954,13 @@ fn whitespace_before_a_forced_break_in_the_next_span_does_not_hang() {
             &[(P, "ab", 16.0), (W, " \nc", 80.0)],
             (176.0, 138.0),
         ),
+        (
+            (N, 16.0),
+            OverflowWrap::Normal,
+            1.0,
+            &[(P, "ab", 16.0), (B, " ", 16.0), (W, " \nc", 80.0)],
+            (160.0, 122.0),
+        ),
     ];
     for (strut, overflow_wrap, width, parts, (height, baseline)) in mixed {
         let (h, placed) = mono_spans(strut, overflow_wrap, Direction::Ltr, 10.0, parts, width);
@@ -1982,6 +1989,62 @@ fn whitespace_before_a_forced_break_in_the_next_span_does_not_hang() {
             Direction::Ltr,
             10.0,
             &parts,
+            width,
+        );
+        let what = format!("{parts:?} at width {width}");
+        assert_eq!(h, height, "{what}: height");
+        assert_at(&what, mono_at(&placed, "c"), (0.0, baseline));
+    }
+    type Padded = &'static [(WhiteSpace, &'static str, f32, Option<f32>)];
+    let padded: [(f32, Padded, (f32, f32)); 7] = [
+        (0.75, &[(B, " \nc", 16.0, Some(0.0))], (48.0, 42.0)),
+        (0.75, &[(B, "  \nc", 16.0, Some(0.0))], (64.0, 58.0)),
+        (
+            1.0,
+            &[(B, " ", 16.0, None), (B, " \nc", 16.0, None)],
+            (48.0, 42.0),
+        ),
+        (
+            0.75,
+            &[(N, "a", 16.0, None), (B, " \nc", 16.0, Some(0.0))],
+            (48.0, 42.0),
+        ),
+        (
+            6.5,
+            &[
+                (N, "a", 16.0, None),
+                (B, "\t", 16.0, Some(6.515625)),
+                (W, " \nc", 16.0, None),
+            ],
+            (64.0, 58.0),
+        ),
+        (
+            6.5,
+            &[
+                (N, "a", 16.0, None),
+                (B, "\t", 16.0, Some(6.53125)),
+                (W, " \nc", 16.0, None),
+            ],
+            (48.0, 42.0),
+        ),
+        (
+            6.5,
+            &[
+                (N, "a", 16.0, None),
+                (B, "\t", 16.0, Some(6.53125)),
+                (W, " ", 16.0, None),
+                (W, "\nc", 16.0, None),
+            ],
+            (48.0, 42.0),
+        ),
+    ];
+    for (width, parts, (height, baseline)) in padded {
+        let (h, placed) = mono_padded(
+            (N, 16.0),
+            OverflowWrap::Normal,
+            Direction::Ltr,
+            10.0,
+            parts,
             width,
         );
         let what = format!("{parts:?} at width {width}");

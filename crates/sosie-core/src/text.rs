@@ -922,7 +922,8 @@ impl<'a> Para<'a> {
             let after_tab = self.g[le - 1].tab;
             let spilled = self.g[le - 1].space
                 && self.styles[self.g[le - 1].span].ws == WhiteSpace::BreakSpaces
-                && !fits(self.fit_width(ls, le), self.avail);
+                && !fits(self.fit_width(ls, le), self.avail)
+                && fits(self.head_width(ls, le), self.avail);
             let line_end = le;
             let mut head_fits = None;
             let mut split = false;
@@ -946,10 +947,7 @@ impl<'a> Para<'a> {
                         || after_tab
                             && (self.g[line_end - 1].hang
                                 || *head_fits.get_or_insert_with(|| {
-                                    fits(
-                                        self.fit_width(ls, self.blank_from(ls, line_end)),
-                                        self.avail,
-                                    )
+                                    fits(self.head_width(ls, line_end), self.avail)
                                 })))
                 {
                     break;
@@ -966,7 +964,9 @@ impl<'a> Para<'a> {
                         && (last.space || last.tab)
                         && self.styles[last.span].ws == WhiteSpace::BreakSpaces
                         && (last.span != self.g[he].span
-                            || ls == hs
+                            || (ls == hs
+                                || self.g[ls - 1].span == last.span
+                                    && self.blank_from(ls - 1, ls) < ls)
                                 && last.space
                                 && self.fit_width(ls, self.blank_from(ls, t)) == 0.0)
                         && !fits(self.fit_width(ls, le), self.avail)

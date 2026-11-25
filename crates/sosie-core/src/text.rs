@@ -212,12 +212,35 @@ struct G {
     pad_after: f32,
 }
 
+struct Pen {
+    ls: usize,
+    k: usize,
+    total: f32,
+    item: f32,
+}
+
+impl Pen {
+    fn new(ls: usize) -> Self {
+        Pen {
+            ls,
+            k: ls,
+            total: 0.0,
+            item: 0.0,
+        }
+    }
+
+    fn width(&self) -> f32 {
+        self.total + ceil64(self.item)
+    }
+}
+
 struct Para<'a> {
     fonts: &'a Fonts,
     text: String,
     styles: Vec<Style>,
     g: Vec<G>,
     adv: Vec<f32>,
+    monotone: bool,
     item_break: Vec<bool>,
     shape_break: Vec<bool>,
     wrap: bool,
@@ -390,6 +413,7 @@ impl<'a> Para<'a> {
             styles,
             g,
             adv: Vec::new(),
+            monotone: false,
             item_break,
             shape_break,
             wrap: para.strut.white_space != WhiteSpace::Pre,
@@ -403,6 +427,7 @@ impl<'a> Para<'a> {
             strut,
         };
         p.adv = p.shape_range(0, n);
+        p.monotone = p.adv.iter().all(|&a| a >= 0.0);
         p
     }
 
@@ -564,34 +589,58 @@ impl<'a> Para<'a> {
         d
     }
 
+    fn step(&self, pen: &mut Pen, adv: &[f32]) -> (f32, f32) {
+        let k = pen.k;
+        if k > pen.ls && self.item_break[k] {
+            pen.total += ceil64(pen.item);
+            pen.item = 0.0;
+        }
+        let g = &self.g[k];
+        if g.pad_before > 0.0 {
+            pen.total += ceil64(pen.item) + g.pad_before;
+            pen.item = 0.0;
+        }
+        let a = if g.tab {
+            self.tab_advance(g.span, pen.total + pen.item)
+        } else {
+            adv[k - pen.ls]
+        };
+        let x0 = pen.total + pen.item;
+        pen.item += a;
+        let x1 = pen.total + pen.item;
+        if g.pad_after > 0.0 {
+            pen.total += ceil64(pen.item) + g.pad_after;
+            pen.item = 0.0;
+        }
+        pen.k += 1;
+        (x0, x1)
+    }
+
     fn walk(&self, ls: usize, t: usize, adv: &[f32]) -> (f32, Vec<(f32, f32)>) {
-        let mut total = 0.0f32;
-        let mut item = 0.0f32;
-        let mut pos = Vec::with_capacity(t - ls);
-        for k in ls..t {
-            if k > ls && self.item_break[k] {
-                total += ceil64(item);
-                item = 0.0;
-            }
-            let g = &self.g[k];
-            if g.pad_before > 0.0 {
-                total += ceil64(item) + g.pad_before;
-                item = 0.0;
-            }
-            let a = if g.tab {
-                self.tab_advance(g.span, total + item)
-            } else {
-                adv[k - ls]
-            };
-            let x0 = total + item;
-            item += a;
-            pos.push((x0, total + item));
-            if g.pad_after > 0.0 {
-                total += ceil64(item) + g.pad_after;
-                item = 0.0;
+        let mut pen = Pen::new(ls);
+        let pos = (ls..t).map(|_| self.step(&mut pen, adv)).collect();
+        (pen.width(), pos)
+    }
+
+    fn prefix_fits(&self, pen: &mut Pen, le: usize) -> bool {
+        let ls = pen.ls;
+        let t = self.trail(ls, le);
+        let trim = if t > ls { self.end_trim(t) } else { 0.0 };
+        while pen.k < t {
+            self.step(pen, &self.adv[ls..]);
+            if self.monotone && pen.width() - trim > self.avail + 1.0 / 64.0 {
+                return false;
             }
         }
-        (total + ceil64(item), pos)
+        let w = pen.width();
+        fits(
+            if w > self.avail && t > ls {
+                w - trim
+            } else {
+                w
+            },
+            self.avail,
+        )
     }
 
     fn trail(&self, ls: usize, le: usize) -> usize {
@@ -615,14 +664,10 @@ impl<'a> Para<'a> {
         }
     }
 
-    fn fit_width(&self, ls: usize, le: usize, reshape: bool) -> f32 {
+    fn fit_width(&self, ls: usize, le: usize) -> f32 {
         let t = self.trail(ls, le);
-        let w = if reshape {
-            let adv = self.shape_range(ls, t);
-            self.walk(ls, t, &adv).0
-        } else {
-            self.walk(ls, t, &self.adv[ls..t]).0
-        };
+        let adv = self.shape_range(ls, t);
+        let w = self.walk(ls, t, &adv).0;
         if w > self.avail && t > ls {
             w - self.end_trim(t)
         } else {
@@ -700,8 +745,9 @@ impl<'a> Para<'a> {
             let cand = |k: usize| opps.get(first + k).copied().unwrap_or(he);
             let count = opps.len() - first + 1;
             let mut best = None;
+            let mut pen = Pen::new(ls);
             for k in 0..count {
-                if fits(self.fit_width(ls, cand(k), false), self.avail) {
+                if self.prefix_fits(&mut pen, cand(k)) {
                     best = Some(k);
                 } else {
                     break;
@@ -711,7 +757,7 @@ impl<'a> Para<'a> {
             if let Some(mut k) = best {
                 loop {
                     let le = cand(k);
-                    if fits(self.fit_width(ls, le, true), self.avail) {
+                    if fits(self.fit_width(ls, le), self.avail) {
                         chosen = Some(le);
                         break;
                     }
@@ -725,19 +771,15 @@ impl<'a> Para<'a> {
                 Some(le) => le,
                 None if !self.anywhere => cand(0),
                 None => {
+                    let mut pen = Pen::new(ls);
+                    self.step(&mut pen, &self.adv[ls..]);
                     let mut g = ls + 1;
-                    while g < he {
-                        let (_, pos) = self.walk(ls, g + 1, &self.adv[ls..g + 1]);
-                        if pos.last().is_some_and(|p| fits(p.1, self.avail)) {
-                            g += 1;
-                        } else {
-                            break;
-                        }
+                    while g < he && fits(self.step(&mut pen, &self.adv[ls..]).1, self.avail) {
+                        g += 1;
                     }
                     loop {
                         let allowed = g == he || wraps(g);
-                        if allowed && (fits(self.fit_width(ls, g, true), self.avail) || g <= ls + 1)
-                        {
+                        if allowed && (fits(self.fit_width(ls, g), self.avail) || g <= ls + 1) {
                             break g;
                         }
                         if g <= ls + 1 {
@@ -750,7 +792,7 @@ impl<'a> Para<'a> {
             let pre_overflow = chosen.is_none()
                 && self.anywhere
                 && self.styles[self.g[le - 1].span].ws == WhiteSpace::Pre
-                && !fits(self.fit_width(ls, le, true), self.avail);
+                && !fits(self.fit_width(ls, le), self.avail);
             let after_tab = self.g[le - 1].tab;
             while le < he && self.g[le].hang {
                 let span = self.g[le].span;

@@ -1695,3 +1695,41 @@ fn many_preserved_newlines_lay_out_in_linear_time() {
         "800,000 newlines took {elapsed:?}"
     );
 }
+
+#[test]
+fn long_lines_and_unbreakable_words_lay_out_in_linear_time() {
+    let fonts = all_fonts();
+    let st = TextStyle {
+        family: FamilyList::parse(MONO),
+        size: 10.0,
+        line_height: 16.0,
+        ..style(MONO, WhiteSpace::Normal)
+    };
+    for (text, width, lines) in [
+        ("a".repeat(150_000), 7.0, 150_000),
+        ("a ".repeat(100_000), 1.0e9, 1),
+    ] {
+        let p = Paragraph {
+            width,
+            strut: st.clone(),
+            overflow_wrap: OverflowWrap::Anywhere,
+            direction: Direction::Ltr,
+        };
+        let start = std::time::Instant::now();
+        let t = layout(
+            &fonts,
+            &p,
+            &[Inline::Text {
+                text,
+                style: st.clone(),
+            }],
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        let elapsed = start.elapsed();
+        assert_eq!(t.lines.len(), lines);
+        assert!(
+            elapsed < std::time::Duration::from_secs(10),
+            "{lines} lines at width {width} took {elapsed:?}"
+        );
+    }
+}

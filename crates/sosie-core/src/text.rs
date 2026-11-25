@@ -793,7 +793,6 @@ impl<'a> Para<'a> {
                 && self.styles[self.g[le - 1].span].ws == WhiteSpace::Pre
                 && !fits(self.fit_width(ls, le), self.avail);
             let after_tab = self.g[le - 1].tab;
-            let stranded = pre_overflow && self.g[le..].iter().any(|g| !g.hang);
             while le < he && self.g[le].hang {
                 let span = self.g[le].span;
                 let end = (le..self.g.len())
@@ -801,7 +800,7 @@ impl<'a> Para<'a> {
                     .unwrap_or(self.g.len());
                 let run = (le..end.min(he)).take_while(|&k| self.g[k].hang).count();
                 let collapsible = self.styles[span].ws == WhiteSpace::Normal;
-                if !collapsible && (stranded || (run < end - le && after_tab)) {
+                if !collapsible && run < end - le && (pre_overflow || after_tab) {
                     break;
                 }
                 le += run;

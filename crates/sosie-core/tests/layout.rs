@@ -1598,6 +1598,20 @@ fn terminal_whitespace_after_an_overflowing_pre_line_hangs() {
             );
             assert_eq!(h, height, "{parts:?} in {strut:?}: height");
         }
+        for tail in [(P, " "), (W, "\u{200b}"), (W, "\u{2060}"), (W, "\u{202c}")] {
+            for width in [1.0, 7.0] {
+                let parts = [(P, "ab"), (W, " "), tail];
+                let (h, _) = mono_run(
+                    strut,
+                    OverflowWrap::Anywhere,
+                    Direction::Ltr,
+                    10.0,
+                    &parts,
+                    width,
+                );
+                assert_eq!(h, 160.0, "{parts:?} in {strut:?} at width {width}: height");
+            }
+        }
     }
 }
 

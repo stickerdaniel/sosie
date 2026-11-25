@@ -801,12 +801,12 @@ impl<'a> Para<'a> {
             let after_tab = self.g[le - 1].tab;
             while le < he && self.g[le].hang {
                 let span = self.g[le].span;
-                let end = (le..self.g.len())
-                    .find(|&k| self.g[k].span != span)
-                    .unwrap_or(self.g.len());
-                let run = (le..end.min(he)).take_while(|&k| self.g[k].hang).count();
+                let end = (le..he).find(|&k| self.g[k].span != span).unwrap_or(he);
+                let run = (le..end).take_while(|&k| self.g[k].hang).count();
                 let collapsible = self.styles[span].ws == WhiteSpace::Normal;
-                if !collapsible && run < end - le && (pre_overflow || after_tab) {
+                let stop = le + run;
+                let held = stop < end || (stop == he && he < self.g.len());
+                if !collapsible && held && (pre_overflow || after_tab) {
                     break;
                 }
                 le += run;

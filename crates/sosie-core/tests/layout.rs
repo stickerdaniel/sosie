@@ -1616,6 +1616,48 @@ fn terminal_whitespace_after_an_overflowing_pre_line_hangs() {
 }
 
 #[test]
+fn whitespace_before_a_forced_break_in_the_next_span_does_not_hang() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
+    let tails: [(&[(WhiteSpace, &str)], f32); 8] = [
+        (&[(W, " "), (W, "\n")], 160.0),
+        (&[(W, "\t"), (W, "\n")], 160.0),
+        (&[(W, " "), (W, "\nc")], 240.0),
+        (&[(W, "\t"), (W, "\nc")], 240.0),
+        (&[(W, " "), (W, " "), (W, "\nc")], 240.0),
+        (&[(W, " "), (W, "\r\nc")], 240.0),
+        (&[(W, " "), (P, "\nc")], 240.0),
+        (&[(W, " "), (B, "\nc")], 240.0),
+    ];
+    for strut in [N, W, B] {
+        for direction in [Direction::Ltr, Direction::Rtl] {
+            for width in [1.0, 7.0] {
+                for (tail, height) in tails {
+                    let parts: Vec<_> = [(P, "ab")].iter().chain(tail).copied().collect();
+                    let (h, placed) = mono_run(
+                        strut,
+                        OverflowWrap::Anywhere,
+                        direction,
+                        10.0,
+                        &parts,
+                        width,
+                    );
+                    let what = format!("{parts:?} in {strut:?} {direction:?} at width {width}");
+                    assert_eq!(h, height, "{what}: height");
+                    if height == 240.0 {
+                        let x = if matches!(direction, Direction::Rtl) {
+                            width - 6.015625
+                        } else {
+                            0.0
+                        };
+                        assert_at(&what, mono_at(&placed, "c"), (x, 202.0));
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn an_inline_box_before_pre_whitespace_breaks_like_chromium() {
     use WhiteSpace::{Normal as N, Pre as P};
     let mono = |white_space, size, line_height| TextStyle {

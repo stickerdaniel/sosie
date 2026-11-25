@@ -1907,3 +1907,72 @@ fn trimmed_cjk_punctuation_never_moves_the_pen_backwards() {
         );
     }
 }
+
+#[test]
+fn spread_negative_trims_and_many_spans_cost_like_linear_controls() {
+    let st = TextStyle {
+        family: FamilyList::parse(MONO),
+        size: 10.0,
+        line_height: 16.0,
+        ..style(MONO, WhiteSpace::Normal)
+    };
+    let tiny_mono = TextStyle {
+        size: 1.0 / 64.0,
+        ..st.clone()
+    };
+    let cjk = |size| TextStyle {
+        family: FamilyList::parse("Noto Sans CJK JP"),
+        size,
+        ..st.clone()
+    };
+    let text = |text: &str, style: &TextStyle| Inline::Text {
+        text: text.to_string(),
+        style: style.clone(),
+    };
+    let spread = |size| -> Vec<Inline> {
+        (0..50_000)
+            .flat_map(|_| {
+                [
+                    text("a\u{2060}", &tiny_mono),
+                    text("。。\u{2060}", &cjk(size)),
+                ]
+            })
+            .collect()
+    };
+    let timed = |inlines: &[Inline], width: f32, lines: usize| {
+        let p = Paragraph {
+            width,
+            strut: st.clone(),
+            overflow_wrap: OverflowWrap::Anywhere,
+            direction: Direction::Ltr,
+        };
+        let start = std::time::Instant::now();
+        let t = layout(shared_fonts(), &p, inlines).unwrap_or_else(|e| panic!("{e}"));
+        let elapsed = start.elapsed();
+        assert_eq!(t.lines.len(), lines);
+        elapsed
+    };
+    for (what, inlines, control, width, lines) in [
+        (
+            "50,000 tiny trimmed periods",
+            spread(0.01),
+            (spread(1.0 / 64.0), 150_000),
+            0.01,
+            50_000,
+        ),
+        (
+            "500,000 one-character spans",
+            vec![text("a", &st); 500_000],
+            (vec![text(&"a".repeat(500_000), &st)], 1),
+            1.0e9,
+            1,
+        ),
+    ] {
+        let base = timed(&control.0, width, control.1);
+        let elapsed = timed(&inlines, width, lines);
+        assert!(
+            elapsed < base * 4,
+            "{what} took {elapsed:?}, its linear control {base:?}"
+        );
+    }
+}

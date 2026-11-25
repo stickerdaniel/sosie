@@ -841,13 +841,13 @@ impl<'a> Para<'a> {
             0.0
         };
         let (mut above, mut below) = self.strut;
-        let mut seen = Vec::new();
+        let mut prev = None;
         for k in ls..le {
             let span = self.g[k].span;
-            if seen.contains(&span) {
+            if prev == Some(span) {
                 continue;
             }
-            seen.push(span);
+            prev = Some(span);
             let st = &self.styles[span];
             let (a, b) = match st.atom {
                 Some((_, bx)) => (bx.height, 0.0),

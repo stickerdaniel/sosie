@@ -743,6 +743,7 @@ impl<'a> Para<'a> {
         opps.sort_unstable();
         opps.dedup();
         let mut ls = hs;
+        let mut ink = hs;
         while ls < he {
             let first = opps.partition_point(|&o| o <= ls);
             let cand = |k: usize| opps.get(first + k).copied().unwrap_or(he);
@@ -803,13 +804,28 @@ impl<'a> Para<'a> {
                 let run = (le..end).take_while(|&k| self.g[k].hang).count();
                 let collapsible = self.styles[span].ws == WhiteSpace::Normal;
                 let stop = le + run;
-                let held = stop < end || (stop == he && he < self.g.len());
+                ink = ink.max(stop);
+                while ink < he && self.g[ink].hang {
+                    ink += 1;
+                }
+                let held = stop < end || (ink == he && he < self.g.len());
                 if !collapsible && held && (pre_overflow || after_tab) {
                     break;
                 }
                 le += run;
             }
             out.push((ls, le));
+            let t = self.trail(ls, le);
+            let last = &self.g[t.max(ls + 1) - 1];
+            if le == he
+                && he < self.g.len()
+                && t > ls
+                && (last.space || last.tab)
+                && self.styles[last.span].ws == WhiteSpace::BreakSpaces
+                && !fits(self.fit_width(ls, le), self.avail)
+            {
+                out.push((he, he));
+            }
             ls = le;
         }
     }

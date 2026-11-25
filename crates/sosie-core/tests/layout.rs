@@ -1215,6 +1215,7 @@ fn overflow_wrap_anywhere_does_not_break_inside_pre() {
 }
 
 type Placed = Vec<(u32, f32, f32)>;
+type Parts = &'static [(WhiteSpace, &'static str)];
 
 fn shared_fonts() -> &'static Fonts {
     static FONTS: std::sync::OnceLock<Fonts> = std::sync::OnceLock::new();
@@ -1623,20 +1624,42 @@ fn terminal_whitespace_after_an_overflowing_pre_line_hangs() {
 #[test]
 fn whitespace_before_a_forced_break_in_the_next_span_does_not_hang() {
     use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
-    let tails: [(&[(WhiteSpace, &str)], f32); 8] = [
-        (&[(W, " "), (W, "\n")], 160.0),
-        (&[(W, "\t"), (W, "\n")], 160.0),
-        (&[(W, " "), (W, "\nc")], 240.0),
-        (&[(W, "\t"), (W, "\nc")], 240.0),
-        (&[(W, " "), (W, " "), (W, "\nc")], 240.0),
-        (&[(W, " "), (W, "\r\nc")], 240.0),
-        (&[(W, " "), (P, "\nc")], 240.0),
-        (&[(W, " "), (B, "\nc")], 240.0),
+    let tails: [(Parts, [f32; 2]); 20] = [
+        (&[(W, " "), (W, "\n")], [160.0, 160.0]),
+        (&[(W, "\t"), (W, "\n")], [160.0, 160.0]),
+        (&[(W, " "), (W, "\nc")], [240.0, 240.0]),
+        (&[(W, "\t"), (W, "\nc")], [240.0, 240.0]),
+        (&[(W, " "), (W, " "), (W, "\nc")], [240.0, 240.0]),
+        (&[(W, " "), (W, "\r\nc")], [240.0, 240.0]),
+        (&[(W, " "), (P, "\nc")], [240.0, 240.0]),
+        (&[(W, " "), (B, "\nc")], [240.0, 240.0]),
+        (&[(W, " "), (N, " "), (W, "\nc")], [240.0, 240.0]),
+        (&[(W, " "), (N, "\t\t"), (W, "\nc")], [240.0, 240.0]),
+        (&[(W, " "), (N, "\n"), (W, "\nc")], [240.0, 240.0]),
+        (&[(W, " "), (N, "\r"), (W, "\nc")], [240.0, 240.0]),
+        (
+            &[(W, " "), (N, " "), (N, "\t\t"), (N, "\n"), (W, "\nc")],
+            [240.0, 240.0],
+        ),
+        (&[(W, " "), (P, " "), (W, "\nc")], [240.0, 240.0]),
+        (&[(W, " "), (B, " "), (W, "\n")], [240.0, 160.0]),
+        (&[(W, " "), (B, " "), (W, "\nc")], [320.0, 240.0]),
+        (&[(W, " "), (B, "\t\t"), (W, "\nc")], [400.0, 320.0]),
+        (&[(W, " "), (B, " "), (N, " "), (W, "\nc")], [320.0, 240.0]),
+        (
+            &[(W, " "), (N, " "), (B, " "), (N, " "), (W, "\nc")],
+            [320.0, 240.0],
+        ),
+        (
+            &[(W, " "), (B, " "), (B, " "), (B, " "), (W, "\nc")],
+            [480.0, 400.0],
+        ),
     ];
     for strut in [N, W, B] {
         for direction in [Direction::Ltr, Direction::Rtl] {
-            for width in [1.0, 7.0] {
-                for (tail, height) in tails {
+            for (width, column) in [(1.0, 0), (7.0, 1)] {
+                for (tail, heights) in tails {
+                    let height = heights[column];
                     let parts: Vec<_> = [(P, "ab")].iter().chain(tail).copied().collect();
                     let (h, placed) = mono_run(
                         strut,
@@ -1648,13 +1671,13 @@ fn whitespace_before_a_forced_break_in_the_next_span_does_not_hang() {
                     );
                     let what = format!("{parts:?} in {strut:?} {direction:?} at width {width}");
                     assert_eq!(h, height, "{what}: height");
-                    if height == 240.0 {
+                    if parts.last().is_some_and(|p| p.1.ends_with('c')) {
                         let x = if matches!(direction, Direction::Rtl) {
                             width - 6.015625
                         } else {
                             0.0
                         };
-                        assert_at(&what, mono_at(&placed, "c"), (x, 202.0));
+                        assert_at(&what, mono_at(&placed, "c"), (x, height - 38.0));
                     }
                 }
             }

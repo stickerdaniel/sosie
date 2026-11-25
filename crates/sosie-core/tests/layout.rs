@@ -1962,10 +1962,14 @@ fn spread_negative_trims_and_many_spans_cost_like_linear_controls() {
             })
             .collect()
     };
-    let timed = |inlines: &[Inline], width: f32, lines: usize| {
+    let pre_wrap = TextStyle {
+        white_space: WhiteSpace::PreWrap,
+        ..st.clone()
+    };
+    let timed = |inlines: &[Inline], strut: &TextStyle, width: f32, lines: usize| {
         let p = Paragraph {
             width,
-            strut: st.clone(),
+            strut: strut.clone(),
             overflow_wrap: OverflowWrap::Anywhere,
             direction: Direction::Ltr,
         };
@@ -1976,11 +1980,12 @@ fn spread_negative_trims_and_many_spans_cost_like_linear_controls() {
         assert_eq!(t.lines.len(), lines);
         elapsed
     };
-    for (what, inlines, control, width, lines) in [
+    for (what, inlines, control, strut, width, lines) in [
         (
             "50,000 tiny trimmed periods",
             spread(0.01),
             (spread(1.0 / 64.0), 150_000),
+            &st,
             0.01,
             50_000,
         ),
@@ -1988,14 +1993,23 @@ fn spread_negative_trims_and_many_spans_cost_like_linear_controls() {
             "500,000 one-character spans",
             vec![text("a", &st); 500_000],
             (vec![text(&"a".repeat(500_000), &st)], 1),
+            &st,
             1.0e9,
             1,
+        ),
+        (
+            "40,000 letters before 40,000 preserved spaces",
+            vec![text(&("a".repeat(40_000) + &" ".repeat(40_000)), &pre_wrap)],
+            (vec![text(&("a".repeat(80_000) + " "), &pre_wrap)], 80_000),
+            &pre_wrap,
+            7.0,
+            40_000,
         ),
     ] {
         let mut runs = Vec::new();
         let linear = (0..3).any(|_| {
-            let base = timed(&control.0, width, control.1);
-            let elapsed = timed(&inlines, width, lines);
+            let base = timed(&control.0, strut, width, control.1);
+            let elapsed = timed(&inlines, strut, width, lines);
             runs.push((elapsed, base));
             elapsed < base * 4
         });

@@ -242,6 +242,8 @@ struct Para<'a> {
     adv: Vec<f32>,
     item_break: Vec<bool>,
     shape_break: Vec<bool>,
+    hang_from: Vec<usize>,
+    span_end: Vec<usize>,
     wrap: bool,
     break_before_spaces: bool,
     anywhere: bool,
@@ -399,6 +401,14 @@ impl<'a> Para<'a> {
                 || q.pad_before > 0.0
                 || styles[p.span].size != styles[q.span].size;
         }
+        let mut hang_from = vec![0; n + 1];
+        for k in 1..=n {
+            hang_from[k] = if g[k - 1].hang { hang_from[k - 1] } else { k };
+        }
+        let mut span_end = vec![0; styles.len()];
+        for (k, gk) in g.iter().enumerate() {
+            span_end[gk.span] = k + 1;
+        }
         let strut_style = resolve(fonts, &para.strut);
         let strut = half_leading(
             fonts,
@@ -414,6 +424,8 @@ impl<'a> Para<'a> {
             adv: Vec::new(),
             item_break,
             shape_break,
+            hang_from,
+            span_end,
             wrap: para.strut.white_space != WhiteSpace::Pre,
             break_before_spaces: matches!(
                 para.strut.white_space,
@@ -648,11 +660,7 @@ impl<'a> Para<'a> {
     }
 
     fn trail(&self, ls: usize, le: usize) -> usize {
-        let mut t = le;
-        while t > ls && self.g[t - 1].hang {
-            t -= 1;
-        }
-        t
+        self.hang_from[le].max(ls)
     }
 
     fn end_trim(&self, t: usize) -> f32 {
@@ -800,7 +808,7 @@ impl<'a> Para<'a> {
             let after_tab = self.g[le - 1].tab;
             while le < he && self.g[le].hang {
                 let span = self.g[le].span;
-                let end = (le..he).find(|&k| self.g[k].span != span).unwrap_or(he);
+                let end = self.span_end[span].min(he);
                 let run = (le..end).take_while(|&k| self.g[k].hang).count();
                 let collapsible = self.styles[span].ws == WhiteSpace::Normal;
                 let stop = le + run;

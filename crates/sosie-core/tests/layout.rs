@@ -1242,6 +1242,18 @@ fn mono_spans(
     parts: &[(WhiteSpace, &str, f32)],
     width: f32,
 ) -> (f32, Placed) {
+    let parts: Vec<_> = parts.iter().map(|&(ws, t, lh)| (ws, t, lh, None)).collect();
+    mono_padded(strut, overflow_wrap, direction, size, &parts, width)
+}
+
+fn mono_padded(
+    strut: (WhiteSpace, f32),
+    overflow_wrap: OverflowWrap,
+    direction: Direction,
+    size: f32,
+    parts: &[(WhiteSpace, &str, f32, Option<f32>)],
+    width: f32,
+) -> (f32, Placed) {
     let mono = |white_space, line_height| TextStyle {
         family: FamilyList::parse(MONO),
         size,
@@ -1257,9 +1269,17 @@ fn mono_spans(
     };
     let inlines: Vec<Inline> = parts
         .iter()
-        .map(|&(ws, t, line_height)| Inline::Text {
+        .map(|&(ws, t, line_height, padding_x)| Inline::Text {
             text: t.to_string(),
-            style: mono(ws, line_height),
+            style: TextStyle {
+                background: padding_x.map(|padding_x| sosie_core::InlineBackground {
+                    padding_x,
+                    padding_y: 0.0,
+                    radius: 0.0,
+                    color: hex("#000000"),
+                }),
+                ..mono(ws, line_height)
+            },
         })
         .collect();
     let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
@@ -1938,6 +1958,33 @@ fn whitespace_before_a_forced_break_in_the_next_span_does_not_hang() {
     for (strut, overflow_wrap, width, parts, (height, baseline)) in mixed {
         let (h, placed) = mono_spans(strut, overflow_wrap, Direction::Ltr, 10.0, parts, width);
         let what = format!("{parts:?} in {strut:?} {overflow_wrap:?} at width {width}");
+        assert_eq!(h, height, "{what}: height");
+        assert_at(&what, mono_at(&placed, "c"), (0.0, baseline));
+    }
+    for (line_height, width, padding_x, (height, baseline)) in [
+        (16.0, 1.0, 1.015625, (64.0, 58.0)),
+        (16.0, 1.0, 1.03125, (48.0, 42.0)),
+        (16.0, 1.0, 3.0, (48.0, 42.0)),
+        (16.0, 7.0, 7.0, (64.0, 58.0)),
+        (16.0, 7.0, 8.0, (48.0, 42.0)),
+        (16.0, 13.0, 13.0, (64.0, 58.0)),
+        (16.0, 13.0, 16.0, (48.0, 42.0)),
+        (80.0, 1.0, 3.0, (240.0, 202.0)),
+    ] {
+        let parts = [
+            (N, "a", line_height, None),
+            (B, " ", line_height, Some(padding_x)),
+            (W, "\nc", line_height, None),
+        ];
+        let (h, placed) = mono_padded(
+            (N, line_height),
+            OverflowWrap::Normal,
+            Direction::Ltr,
+            10.0,
+            &parts,
+            width,
+        );
+        let what = format!("{parts:?} at width {width}");
         assert_eq!(h, height, "{what}: height");
         assert_at(&what, mono_at(&placed, "c"), (0.0, baseline));
     }

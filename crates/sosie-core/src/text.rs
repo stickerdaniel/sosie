@@ -970,12 +970,17 @@ impl<'a> Para<'a> {
                                 && last.space
                                 && self.fit_width(ls, self.blank_from(ls, t)) == 0.0)
                         && !fits(self.fit_width(ls, le), self.avail)
-                        && fits(self.fit_width(ls, self.blank_from(ls, t)), self.avail))
+                        && fits(self.head_width(ls, t), self.avail))
             {
                 out.push((he, he));
             }
             ls = le;
         }
+    }
+
+    fn head_width(&self, ls: usize, t: usize) -> f32 {
+        let b = self.blank_from(ls, t);
+        self.fit_width(ls, b) + self.g[b..t].iter().map(|g| g.pad_before).sum::<f32>()
     }
 
     fn blank_from(&self, ls: usize, t: usize) -> usize {

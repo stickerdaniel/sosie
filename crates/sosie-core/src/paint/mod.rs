@@ -72,12 +72,12 @@ pub fn rasterize(
     dpr: f32,
     limits: &Limits,
 ) -> Result<Pixmap, RenderError> {
-    let (width, height) = limits.output(list.width, list.height, dpr)?;
+    let (width, height, bytes) = limits.output(list.width, list.height, dpr)?;
     let bg = list.background;
     if bg.a != 255 {
         return Err(RenderError::TranslucentBackground);
     }
-    let mut rgba = vec![0u8; width as usize * height as usize * 4];
+    let mut rgba = vec![0u8; bytes];
     for px in rgba.as_chunks_mut::<4>().0 {
         px.copy_from_slice(&[bg.r, bg.g, bg.b, 255]);
     }

@@ -27,6 +27,22 @@ fn dpr_outside_one_to_four_is_refused() {
 }
 
 #[test]
+fn raised_limits_refuse_an_unaddressable_byte_count() {
+    let limits = Limits {
+        min_dpr: 1.0,
+        max_dpr: 4.0,
+        max_width_px: u32::MAX,
+        max_height_px: u32::MAX,
+        max_pixels: u64::MAX,
+    };
+    let list = DisplayList::new(2_147_483_648.0, 2_147_483_648.0, Rgba::WHITE);
+    assert_eq!(
+        rasterize(&Fonts::new(), &list, 1.0, &limits).map(|p| p.rgba.len()),
+        Err(RenderError::Limit(LimitError::Bytes { pixels: 1 << 62 }))
+    );
+}
+
+#[test]
 fn oversized_output_fails_before_allocation() {
     assert_eq!(
         render(5_000.0, 100.0, 2.0, Rgba::WHITE),

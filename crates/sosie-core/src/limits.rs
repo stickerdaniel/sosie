@@ -28,6 +28,7 @@ pub enum LimitError {
     Width { px: u64, max: u32 },
     Height { px: u64, max: u32 },
     Pixels { pixels: u64, max: u64 },
+    Bytes { pixels: u64 },
 }
 
 impl fmt::Display for LimitError {
@@ -43,6 +44,12 @@ impl fmt::Display for LimitError {
             LimitError::Pixels { pixels, max } => {
                 write!(f, "output of {pixels} pixels exceeds {max} pixels")
             }
+            LimitError::Bytes { pixels } => {
+                write!(
+                    f,
+                    "output of {pixels} RGBA pixels exceeds the address space"
+                )
+            }
         }
     }
 }
@@ -55,7 +62,7 @@ impl Limits {
         width: f32,
         height: f32,
         dpr: f32,
-    ) -> Result<(u32, u32), LimitError> {
+    ) -> Result<(u32, u32, usize), LimitError> {
         if !(dpr.is_finite() && dpr >= self.min_dpr && dpr <= self.max_dpr) {
             return Err(LimitError::Dpr {
                 dpr,
@@ -88,6 +95,10 @@ impl Limits {
                 max: self.max_pixels,
             });
         }
-        Ok((w as u32, h as u32))
+        let bytes = usize::try_from(pixels)
+            .ok()
+            .and_then(|p| p.checked_mul(4))
+            .ok_or(LimitError::Bytes { pixels })?;
+        Ok((w as u32, h as u32, bytes))
     }
 }

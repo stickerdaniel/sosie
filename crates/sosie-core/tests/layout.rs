@@ -1571,6 +1571,99 @@ fn an_overridden_line_end_bracket_paints_inside_the_line() {
 }
 
 #[test]
+fn terminal_whitespace_after_an_overflowing_pre_line_hangs() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
+    for strut in [N, W, B] {
+        for (tail, height) in [(" ", 80.0), ("  ", 80.0), ("\t", 80.0), (" \n", 160.0)] {
+            let parts = [(P, "ab"), (W, tail)];
+            let (h, _) = mono_run(
+                strut,
+                OverflowWrap::Anywhere,
+                Direction::Ltr,
+                10.0,
+                &parts,
+                7.0,
+            );
+            assert_eq!(h, height, "{parts:?} in {strut:?}: height");
+        }
+    }
+}
+
+#[test]
+fn a_leading_empty_box_keeps_pre_whitespace_on_its_line() {
+    use WhiteSpace::{Normal as N, Pre as P};
+    let mono = |white_space| TextStyle {
+        family: FamilyList::parse(MONO),
+        size: 10.0,
+        line_height: 80.0,
+        tab_size: 1,
+        ..style(MONO, white_space)
+    };
+    let empty = Inline::Box(InlineBox {
+        width: 0.0,
+        height: 0.0,
+    });
+    let text = |white_space, t: &str| Inline::Text {
+        text: t.to_string(),
+        style: mono(white_space),
+    };
+    for (inlines, width, height, last, at) in [
+        (
+            vec![empty.clone(), text(P, " b")],
+            7.0,
+            80.0,
+            (6.0, 42.0),
+            (0, 0.0),
+        ),
+        (
+            vec![text(N, "a"), empty.clone(), text(P, " b")],
+            13.0,
+            160.0,
+            (6.0, 122.0),
+            (0, 6.015625),
+        ),
+    ] {
+        let p = Paragraph {
+            width,
+            strut: mono(N),
+            overflow_wrap: OverflowWrap::Normal,
+            direction: Direction::Ltr,
+        };
+        let t = layout(&all_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+        let mut list = DisplayList::new(100.0, 400.0, hex("#ffffff"));
+        t.paint(&mut list, 0.0, 0.0);
+        let got = list
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Glyphs {
+                    x,
+                    baseline,
+                    glyphs,
+                    ..
+                } => glyphs.last().map(|g| (x + g.x, baseline + g.y)),
+                _ => None,
+            })
+            .next_back()
+            .unwrap_or((f32::NAN, f32::NAN));
+        let what = format!("{} inlines at width {width}", inlines.len());
+        assert_eq!(t.height, height, "{what}: height");
+        assert_at(&what, got, last);
+        let placed = t
+            .lines
+            .iter()
+            .enumerate()
+            .find_map(|(i, l)| l.boxes.first().map(|b| (i, b.x)));
+        assert!(
+            placed.is_some_and(|(line, x)| line == at.0 && (x - at.1).abs() <= 1.0 / 64.0),
+            "{what}: box at {placed:?}, Chromium line {} x {}",
+            at.0,
+            at.1
+        );
+    }
+}
+
+#[test]
 fn many_preserved_newlines_lay_out_in_linear_time() {
     let fonts = all_fonts();
     let st = TextStyle {

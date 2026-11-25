@@ -1573,9 +1573,21 @@ fn an_overridden_line_end_bracket_paints_inside_the_line() {
 #[test]
 fn terminal_whitespace_after_an_overflowing_pre_line_hangs() {
     use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
+    let tails: [(&[(WhiteSpace, &str)], f32); 10] = [
+        (&[(W, " ")], 80.0),
+        (&[(W, "  ")], 80.0),
+        (&[(W, "\t")], 80.0),
+        (&[(W, " \n")], 160.0),
+        (&[(W, " "), (W, " ")], 80.0),
+        (&[(W, " "), (N, " ")], 80.0),
+        (&[(W, "\t"), (W, " ")], 80.0),
+        (&[(W, " "), (W, "\t")], 80.0),
+        (&[(W, " "), (N, " "), (W, "\t")], 80.0),
+        (&[(W, " "), (W, " \n")], 160.0),
+    ];
     for strut in [N, W, B] {
-        for (tail, height) in [(" ", 80.0), ("  ", 80.0), ("\t", 80.0), (" \n", 160.0)] {
-            let parts = [(P, "ab"), (W, tail)];
+        for (tail, height) in tails {
+            let parts: Vec<_> = [(P, "ab")].iter().chain(tail).copied().collect();
             let (h, _) = mono_run(
                 strut,
                 OverflowWrap::Anywhere,
@@ -1590,42 +1602,78 @@ fn terminal_whitespace_after_an_overflowing_pre_line_hangs() {
 }
 
 #[test]
-fn a_leading_empty_box_keeps_pre_whitespace_on_its_line() {
+fn an_inline_box_before_pre_whitespace_breaks_like_chromium() {
     use WhiteSpace::{Normal as N, Pre as P};
-    let mono = |white_space| TextStyle {
+    let mono = |white_space, size, line_height| TextStyle {
         family: FamilyList::parse(MONO),
-        size: 10.0,
-        line_height: 80.0,
+        size,
+        line_height,
         tab_size: 1,
         ..style(MONO, white_space)
     };
-    let empty = Inline::Box(InlineBox {
-        width: 0.0,
-        height: 0.0,
-    });
+    let inline_box = |side| {
+        Inline::Box(InlineBox {
+            width: side,
+            height: side,
+        })
+    };
     let text = |white_space, t: &str| Inline::Text {
         text: t.to_string(),
-        style: mono(white_space),
+        style: mono(white_space, 10.0, 80.0),
     };
-    for (inlines, width, height, last, at) in [
+    for (strut, inlines, width, height, b, at) in [
         (
-            vec![empty.clone(), text(P, " b")],
+            (10.0, 80.0),
+            vec![inline_box(0.0), text(P, " b")],
             7.0,
-            80.0,
-            (6.0, 42.0),
-            (0, 0.0),
+            160.0,
+            (6.0, 122.0),
+            (0.0, 42.0),
         ),
         (
-            vec![text(N, "a"), empty.clone(), text(P, " b")],
+            (10.0, 80.0),
+            vec![text(N, "a"), inline_box(0.0), text(P, " b")],
             13.0,
             160.0,
             (6.0, 122.0),
-            (0, 6.015625),
+            (6.015625, 42.0),
+        ),
+        (
+            (10.0, 80.0),
+            vec![inline_box(6.0), text(P, " b")],
+            7.0,
+            160.0,
+            (6.0, 122.0),
+            (0.0, 36.0),
+        ),
+        (
+            (0.0, 0.0),
+            vec![inline_box(6.0), text(P, " b")],
+            7.0,
+            86.0,
+            (6.0, 48.0),
+            (0.0, 0.0),
+        ),
+        (
+            (10.0, 0.0),
+            vec![inline_box(6.0), text(P, " b")],
+            7.0,
+            86.0,
+            (6.0, 48.0),
+            (0.0, 0.0),
+        ),
+        (
+            (10.0, 0.0),
+            vec![inline_box(0.0), text(P, " b")],
+            7.0,
+            82.0,
+            (6.0, 44.0),
+            (0.0, 2.0),
         ),
     ] {
         let p = Paragraph {
             width,
-            strut: mono(N),
+            strut: mono(N, strut.0, strut.1),
             overflow_wrap: OverflowWrap::Normal,
             direction: Direction::Ltr,
         };
@@ -1646,19 +1694,19 @@ fn a_leading_empty_box_keeps_pre_whitespace_on_its_line() {
             })
             .next_back()
             .unwrap_or((f32::NAN, f32::NAN));
-        let what = format!("{} inlines at width {width}", inlines.len());
+        let what = format!(
+            "{} inlines under a {strut:?} strut at width {width}",
+            inlines.len()
+        );
         assert_eq!(t.height, height, "{what}: height");
-        assert_at(&what, got, last);
+        assert_at(&what, got, b);
         let placed = t
             .lines
             .iter()
-            .enumerate()
-            .find_map(|(i, l)| l.boxes.first().map(|b| (i, b.x)));
+            .find_map(|l| l.boxes.first().map(|b| (b.x, b.y)));
         assert!(
-            placed.is_some_and(|(line, x)| line == at.0 && (x - at.1).abs() <= 1.0 / 64.0),
-            "{what}: box at {placed:?}, Chromium line {} x {}",
-            at.0,
-            at.1
+            placed.is_some_and(|(x, y)| (x - at.0).abs() <= 1.0 / 64.0 && y == at.1),
+            "{what}: box at {placed:?}, Chromium {at:?}"
         );
     }
 }

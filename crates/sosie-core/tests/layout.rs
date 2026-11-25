@@ -2255,6 +2255,23 @@ fn assert_linear(
     );
 }
 
+fn assert_scales_linearly(what: &str, n: usize, mut run: impl FnMut(usize) -> std::time::Duration) {
+    let mut fastest = (std::time::Duration::MAX, std::time::Duration::MAX);
+    for _ in 0..5 {
+        fastest.0 = fastest.0.min(run(n));
+        fastest.1 = fastest.1.min(run(4 * n));
+        if fastest.1 < fastest.0 * 8 {
+            return;
+        }
+    }
+    panic!(
+        "{what} took at best {:?} at {} units against {:?} at {n}",
+        fastest.1,
+        4 * n,
+        fastest.0
+    );
+}
+
 #[test]
 fn spread_negative_trims_and_many_spans_cost_like_linear_controls() {
     let st = TextStyle {
@@ -2339,78 +2356,67 @@ fn spread_negative_trims_and_many_spans_cost_like_linear_controls() {
 }
 
 #[test]
-fn unsafe_shaping_cuts_cost_like_linear_controls() {
+fn unsafe_shaping_cuts_scale_linearly() {
     let st = TextStyle {
         family: FamilyList::parse(SANS),
         size: 10.0,
         line_height: 16.0,
         ..style(SANS, WhiteSpace::Normal)
     };
-    let timed = |text: &str, overflow_wrap, width, lines| {
+    for (what, unit, count, ends, overflow_wrap, width, lines) in [
+        (
+            "a kerned pair across word joiners",
+            "\u{2060}",
+            2_000,
+            ("A", "V"),
+            OverflowWrap::Anywhere,
+            6.1,
+            2,
+        ),
+        (
+            "a kerned pair across break opportunities",
+            "\u{200b}\u{2060}",
+            2_000,
+            ("A", "V"),
+            OverflowWrap::Normal,
+            6.1,
+            2,
+        ),
+        (
+            "a kerned pair across marks on word joiners",
+            "\u{2060}\u{301}",
+            2_000,
+            ("A", "V"),
+            OverflowWrap::Anywhere,
+            6.1,
+            2,
+        ),
+        (
+            "a ligature across word joiners",
+            "\u{2060}",
+            32_000,
+            ("f", "i"),
+            OverflowWrap::Anywhere,
+            400.0,
+            1,
+        ),
+    ] {
         let p = Paragraph {
             width,
             strut: st.clone(),
             overflow_wrap,
             direction: Direction::Ltr,
         };
-        let inlines = [Inline::Text {
-            text: text.to_string(),
-            style: st.clone(),
-        }];
-        let start = std::time::Instant::now();
-        let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
-        let elapsed = start.elapsed();
-        assert_eq!(t.lines.len(), lines, "{text:?}");
-        elapsed
-    };
-    for (what, unit, count, ends, control, overflow_wrap, width, lines) in [
-        (
-            "a kerned pair across 4,000 word joiners",
-            "\u{2060}",
-            4_000,
-            ("A", "V"),
-            "I",
-            OverflowWrap::Anywhere,
-            6.1,
-            2,
-        ),
-        (
-            "a kerned pair across 4,000 break opportunities",
-            "\u{200b}\u{2060}",
-            4_000,
-            ("A", "V"),
-            "I",
-            OverflowWrap::Normal,
-            6.1,
-            2,
-        ),
-        (
-            "a kerned pair across 4,000 marks on word joiners",
-            "\u{2060}\u{301}",
-            4_000,
-            ("A", "V"),
-            "I",
-            OverflowWrap::Anywhere,
-            6.1,
-            2,
-        ),
-        (
-            "a ligature across 64,000 word joiners",
-            "\u{2060}",
-            64_000,
-            ("f", "i"),
-            "x",
-            OverflowWrap::Anywhere,
-            400.0,
-            1,
-        ),
-    ] {
-        let text = format!("{}{}{}", ends.0, unit.repeat(count), ends.1);
-        let base = format!("{}{}{control}", ends.0, unit.repeat(count));
-        assert_linear(
-            what,
-            || timed(&text, overflow_wrap, width, lines),
-            || timed(&base, overflow_wrap, width, lines),
-        );
+        assert_scales_linearly(what, count, |n| {
+            let inlines = [Inline::Text {
+                text: format!("{}{}{}", ends.0, unit.repeat(n), ends.1),
+                style: st.clone(),
+            }];
+            let start = std::time::Instant::now();
+            let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+            let elapsed = start.elapsed();
+            assert_eq!(t.lines.len(), lines, "{what} at {n}");
+            elapsed
+        });
     }
 }

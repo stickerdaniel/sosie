@@ -1569,3 +1569,36 @@ fn an_overridden_line_end_bracket_paints_inside_the_line() {
         "ink x {ink:?}, Chromium (20, 39)"
     );
 }
+
+#[test]
+fn many_preserved_newlines_lay_out_in_linear_time() {
+    let fonts = all_fonts();
+    let st = TextStyle {
+        family: FamilyList::parse(MONO),
+        size: 10.0,
+        line_height: 16.0,
+        ..style(MONO, WhiteSpace::Pre)
+    };
+    let p = Paragraph {
+        width: 100.0,
+        strut: st.clone(),
+        overflow_wrap: OverflowWrap::Normal,
+        direction: Direction::Ltr,
+    };
+    let start = std::time::Instant::now();
+    let t = layout(
+        &fonts,
+        &p,
+        &[Inline::Text {
+            text: "\n".repeat(800_000),
+            style: st,
+        }],
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let elapsed = start.elapsed();
+    assert_eq!(t.lines.len(), 800_000);
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "800,000 newlines took {elapsed:?}"
+    );
+}

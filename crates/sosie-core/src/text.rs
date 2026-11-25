@@ -5,7 +5,7 @@ use crate::display::{DisplayList, GlyphPos, Item};
 use crate::fonts::{FaceId, Family, FamilyList, Fonts};
 use crate::{linebreak, script, shape};
 use std::ops::Range;
-use unicode_bidi::{BidiInfo, Level};
+use unicode_bidi::{BidiClass, BidiInfo, Level};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum WhiteSpace {
@@ -320,12 +320,7 @@ impl<'a> Para<'a> {
         };
         let bidi = BidiInfo::new(&text, base);
         let rtl_base = bidi.paragraphs.first().is_some_and(|p| p.level.is_rtl());
-        let mut levels = bidi.levels.clone();
-        for para in &bidi.paragraphs {
-            let range = para.range.clone();
-            levels[range.clone()]
-                .copy_from_slice(&bidi.reordered_levels(para, range.clone())[range]);
-        }
+        let levels = line_levels(&bidi);
         let scripts = script::resolve(&text);
         let gbs = linebreak::grapheme_boundaries(&text);
         let mut g = Vec::new();
@@ -984,6 +979,39 @@ impl<'a> Para<'a> {
         }
         vpos
     }
+}
+
+fn line_levels(bidi: &BidiInfo) -> Vec<Level> {
+    use BidiClass::{B, BN, FSI, LRE, LRI, LRO, PDF, PDI, RLE, RLI, RLO, S, WS};
+    let mut levels = bidi.levels.clone();
+    for para in &bidi.paragraphs {
+        let range = para.range.clone();
+        let mut reset_from = Some(range.start);
+        let mut prev = para.level;
+        for (offset, c) in bidi.text[range.clone()].char_indices() {
+            let i = range.start + offset;
+            let end = i + c.len_utf8();
+            match bidi.original_classes[i] {
+                B | S => {
+                    levels[reset_from.unwrap_or(i)..end].fill(para.level);
+                    reset_from = None;
+                }
+                WS | FSI | LRI | RLI | PDI => {
+                    reset_from.get_or_insert(i);
+                }
+                RLE | LRE | RLO | LRO | PDF | BN => {
+                    reset_from.get_or_insert(i);
+                    levels[i..end].fill(prev);
+                }
+                _ => reset_from = None,
+            }
+            prev = levels[i];
+        }
+        if let Some(from) = reset_from {
+            levels[from..range.end].fill(para.level);
+        }
+    }
+    levels
 }
 
 fn visual_order(levels: &[u8]) -> Vec<usize> {

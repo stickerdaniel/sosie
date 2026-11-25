@@ -777,11 +777,14 @@ impl<'a> Para<'a> {
         let t = self.trail(ls, le);
         let adv = self.shape_range(ls, t);
         let (full, mut pos) = self.walk(ls, t, &adv);
-        if self.wrap && full > self.avail && t > ls {
-            let trim = self.end_trim(t);
-            if let Some(p) = pos.last_mut() {
-                p.1 -= trim;
-            }
+        let soft = le < self.g.len() && !self.g[le].nl;
+        let trim = if (self.wrap || soft) && full > self.avail && t > ls {
+            self.end_trim(t)
+        } else {
+            0.0
+        };
+        if let Some(p) = pos.last_mut() {
+            p.1 -= trim;
         }
         let vpos = self.visual(ls, t, &pos);
         let ink: Vec<usize> = (ls..t)
@@ -792,7 +795,7 @@ impl<'a> Para<'a> {
             _ => 0.0,
         };
         let shift = if self.rtl_base {
-            self.avail - full
+            self.avail - (full - trim)
         } else {
             0.0
         };
@@ -812,7 +815,14 @@ impl<'a> Para<'a> {
             above = above.max(a);
             below = below.max(b);
         }
-        let trims = self.han_trim(ls, t);
+        let mut trims = self.han_trim(ls, t);
+        if let Some(last) = trims.last_mut() {
+            if self.g[t - 1].level % 2 == 1 {
+                last.0 += trim;
+            } else {
+                last.1 += trim;
+            }
+        }
         let mut runs = Vec::new();
         let mut boxes = Vec::new();
         let mut glyphs = Vec::new();

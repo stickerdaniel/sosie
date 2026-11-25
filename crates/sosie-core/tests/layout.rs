@@ -1458,3 +1458,114 @@ fn a_lone_carriage_return_paints_nothing_and_takes_no_width() {
         assert_eq!(inked, 2, "{what}: painted glyphs {placed:?}");
     }
 }
+
+fn trimmed_line_end(strut: WhiteSpace, direction: Direction) -> (Vec<(f32, f32)>, f32) {
+    let fonts = all_fonts();
+    let cjk = |white_space| TextStyle {
+        family: FamilyList::parse(SANS),
+        size: 14.0,
+        line_height: 80.0,
+        color: hex("#ff0000"),
+        background: Some(sosie_core::InlineBackground {
+            padding_x: 0.0,
+            padding_y: 0.0,
+            radius: 0.0,
+            color: hex("#0000ff"),
+        }),
+        ..style("Noto Sans", white_space)
+    };
+    let p = Paragraph {
+        width: 21.0,
+        strut: cjk(strut),
+        overflow_wrap: OverflowWrap::Normal,
+        direction,
+    };
+    let t = layout(
+        &fonts,
+        &p,
+        &[Inline::Text {
+            text: "中）文".to_string(),
+            style: cjk(WhiteSpace::Normal),
+        }],
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let mut list = DisplayList::new(320.0, 200.0, hex("#ffffff"));
+    t.paint(&mut list, 20.0, 0.0);
+    let backgrounds = list
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::TextBackground { x0, x1, .. } => Some((*x0, *x1)),
+            _ => None,
+        })
+        .collect();
+    let first = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            Item::Glyphs { x, glyphs, .. } => glyphs.first().map(|g| x + g.x),
+            _ => None,
+        })
+        .unwrap_or(f32::NAN);
+    (backgrounds, first)
+}
+
+#[test]
+fn a_wrapped_line_trims_its_end_bracket_under_a_pre_strut() {
+    for strut in [WhiteSpace::Pre, WhiteSpace::Normal] {
+        let (backgrounds, first) = trimmed_line_end(strut, Direction::Ltr);
+        assert_eq!(
+            backgrounds.first(),
+            Some(&(20.0, 41.0)),
+            "{strut:?}: background"
+        );
+        assert_eq!(first, 20.0, "{strut:?}: first glyph");
+    }
+}
+
+#[test]
+fn an_rtl_line_aligns_by_its_trimmed_width() {
+    for strut in [WhiteSpace::Normal, WhiteSpace::Pre] {
+        let (backgrounds, first) = trimmed_line_end(strut, Direction::Rtl);
+        assert_eq!(
+            backgrounds.first(),
+            Some(&(20.0, 41.0)),
+            "{strut:?}: background"
+        );
+        assert_eq!(first, 20.0, "{strut:?}: first glyph");
+    }
+}
+
+#[test]
+fn an_overridden_line_end_bracket_paints_inside_the_line() {
+    let fonts = all_fonts();
+    let red = TextStyle {
+        size: 14.0,
+        line_height: 80.0,
+        color: hex("#ff0000"),
+        ..style("Noto Sans", WhiteSpace::Normal)
+    };
+    let p = Paragraph {
+        width: 21.0,
+        strut: TextStyle {
+            color: hex("#000000"),
+            ..red.clone()
+        },
+        overflow_wrap: OverflowWrap::Normal,
+        direction: Direction::Ltr,
+    };
+    let t = layout(
+        &fonts,
+        &p,
+        &[Inline::Text {
+            text: "\u{202e}中）文\u{202c}".to_string(),
+            style: red,
+        }],
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let (_, ink) = painted(&fonts, &t, "#ff0000");
+    assert!(
+        ink.0.abs_diff(20) <= 1 && ink.1.abs_diff(39) <= 1,
+        "ink x {ink:?}, Chromium (20, 39)"
+    );
+}

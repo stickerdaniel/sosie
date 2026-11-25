@@ -1851,3 +1851,59 @@ fn long_lines_and_unbreakable_words_lay_out_in_linear_time() {
         );
     }
 }
+
+#[test]
+fn trimmed_cjk_punctuation_never_moves_the_pen_backwards() {
+    let st = TextStyle {
+        family: FamilyList::parse(MONO),
+        size: 10.0,
+        line_height: 16.0,
+        ..style(MONO, WhiteSpace::Normal)
+    };
+    let cjk = |size| TextStyle {
+        family: FamilyList::parse("Noto Sans CJK JP"),
+        size,
+        ..st.clone()
+    };
+    let text = |text: &str, style: &TextStyle| Inline::Text {
+        text: text.to_string(),
+        style: style.clone(),
+    };
+    let para = |width| Paragraph {
+        width,
+        strut: st.clone(),
+        overflow_wrap: OverflowWrap::Anywhere,
+        direction: Direction::Ltr,
+    };
+    for size in [0.01, 0.02, 0.05] {
+        let inlines = [text("x", &st), text("。。", &cjk(size)), text("y", &st)];
+        let t = layout(shared_fonts(), &para(400.0), &inlines).unwrap_or_else(|e| panic!("{e}"));
+        let mut list = DisplayList::new(400.0, 100.0, hex("#ffffff"));
+        t.paint(&mut list, 0.0, 0.0);
+        let xs: Vec<f32> = list
+            .items
+            .iter()
+            .flat_map(|i| match i {
+                Item::Glyphs { x, glyphs, .. } => glyphs.iter().map(|g| x + g.x).collect(),
+                _ => Vec::new(),
+            })
+            .collect();
+        assert!(
+            xs.len() == 4 && xs.windows(2).all(|w| w[0] <= w[1]),
+            "x, two full stops and y at size {size}: glyphs at {xs:?}"
+        );
+    }
+    let inlines = [
+        text(&"a".repeat(100), &st),
+        text(&"。".repeat(50_000), &cjk(0.01)),
+    ];
+    let t = layout(shared_fonts(), &para(350.03125), &inlines).unwrap_or_else(|e| panic!("{e}"));
+    for line in &t.lines {
+        let ascii = t.line_text(line).matches('a').count();
+        assert!(
+            line.advance >= 6.0 * ascii as f32,
+            "a line with {ascii} \"a\" has advance {}",
+            line.advance
+        );
+    }
+}

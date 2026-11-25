@@ -240,7 +240,6 @@ struct Para<'a> {
     styles: Vec<Style>,
     g: Vec<G>,
     adv: Vec<f32>,
-    neg: Vec<f64>,
     item_break: Vec<bool>,
     shape_break: Vec<bool>,
     wrap: bool,
@@ -413,7 +412,6 @@ impl<'a> Para<'a> {
             styles,
             g,
             adv: Vec::new(),
-            neg: Vec::new(),
             item_break,
             shape_break,
             wrap: para.strut.white_space != WhiteSpace::Pre,
@@ -426,13 +424,7 @@ impl<'a> Para<'a> {
             rtl_base,
             strut,
         };
-        p.adv = p.shape_range(0, n);
-        p.neg = std::iter::once(0.0)
-            .chain(p.adv.iter().scan(0.0, |sum, &a| {
-                *sum += a.min(0.0) as f64;
-                Some(*sum)
-            }))
-            .collect();
+        p.adv = p.shape_range(0, n).0;
         p
     }
 
@@ -466,7 +458,7 @@ impl<'a> Para<'a> {
         );
     }
 
-    fn shape_range(&self, ls: usize, le: usize) -> Vec<f32> {
+    fn shape_range(&self, ls: usize, le: usize) -> (Vec<f32>, Vec<(f32, f32)>) {
         let mut adv = vec![0.0f32; le - ls];
         let mut glyphs = Vec::new();
         for (a, b) in self.items(ls, le) {
@@ -511,10 +503,17 @@ impl<'a> Para<'a> {
                 }
             }
         }
-        for (a, (lead, tail)) in adv.iter_mut().zip(self.han_trim(ls, le)) {
-            *a -= lead + tail;
+        let mut trims = self.han_trim(ls, le);
+        for (a, (lead, tail)) in adv.iter_mut().zip(&mut trims) {
+            let room = a.max(0.0);
+            if *lead + *tail > room {
+                let scale = room / (*lead + *tail);
+                *lead *= scale;
+                *tail *= scale;
+            }
+            *a = (*a - *lead - *tail).max(0.0);
         }
-        adv
+        (adv, trims)
     }
 
     fn is_cjk(&self, k: usize) -> bool {
@@ -633,8 +632,7 @@ impl<'a> Para<'a> {
         let trim = if t > ls { self.end_trim(t) } else { 0.0 };
         while pen.k < t {
             self.step(pen, &self.adv[ls..]);
-            let ahead = (self.neg[t] - self.neg[pen.k]) as f32;
-            if pen.total + pen.item + ahead - trim > self.avail + 1.0 / 64.0 {
+            if pen.width() - trim > self.avail + 1.0 / 64.0 {
                 return false;
             }
         }
@@ -672,7 +670,7 @@ impl<'a> Para<'a> {
 
     fn fit_width(&self, ls: usize, le: usize) -> f32 {
         let t = self.trail(ls, le);
-        let adv = self.shape_range(ls, t);
+        let adv = self.shape_range(ls, t).0;
         let w = self.walk(ls, t, &adv).0;
         if w > self.avail && t > ls {
             w - self.end_trim(t)
@@ -818,7 +816,7 @@ impl<'a> Para<'a> {
 
     fn line(&self, ls: usize, le: usize, top: f32) -> Line {
         let t = self.trail(ls, le);
-        let adv = self.shape_range(ls, t);
+        let (adv, mut trims) = self.shape_range(ls, t);
         let (full, mut pos) = self.walk(ls, t, &adv);
         let soft = le < self.g.len() && !self.g[le].nl;
         let trim = if (self.wrap || soft) && full > self.avail && t > ls {
@@ -858,7 +856,6 @@ impl<'a> Para<'a> {
             above = above.max(a);
             below = below.max(b);
         }
-        let mut trims = self.han_trim(ls, t);
         if let Some(last) = trims.last_mut() {
             if self.g[t - 1].level % 2 == 1 {
                 last.0 += trim;

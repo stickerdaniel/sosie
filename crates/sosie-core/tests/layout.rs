@@ -1216,6 +1216,11 @@ fn overflow_wrap_anywhere_does_not_break_inside_pre() {
 
 type Placed = Vec<(u32, f32, f32)>;
 
+fn shared_fonts() -> &'static Fonts {
+    static FONTS: std::sync::OnceLock<Fonts> = std::sync::OnceLock::new();
+    FONTS.get_or_init(all_fonts)
+}
+
 fn mono_run(
     strut: WhiteSpace,
     overflow_wrap: OverflowWrap,
@@ -1244,7 +1249,7 @@ fn mono_run(
             style: mono(ws),
         })
         .collect();
-    let t = layout(&all_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+    let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
     let mut list = DisplayList::new(100.0, 400.0, hex("#ffffff"));
     t.paint(&mut list, 0.0, 0.0);
     let placed = list

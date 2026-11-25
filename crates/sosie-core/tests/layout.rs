@@ -1767,9 +1767,26 @@ fn long_lines_and_unbreakable_words_lay_out_in_linear_time() {
         line_height: 16.0,
         ..style(MONO, WhiteSpace::Normal)
     };
-    for (text, width, lines) in [
-        ("a".repeat(150_000), 7.0, 150_000),
-        ("a ".repeat(100_000), 1.0e9, 1),
+    let tiny_cjk = TextStyle {
+        family: FamilyList::parse("Noto Sans CJK JP"),
+        size: 0.01,
+        ..st.clone()
+    };
+    let text = |text: String, style: &TextStyle| Inline::Text {
+        text,
+        style: style.clone(),
+    };
+    for (inlines, width, lines) in [
+        (vec![text("a".repeat(150_000), &st)], 7.0, 150_000),
+        (vec![text("a ".repeat(100_000), &st)], 1.0e9, 1),
+        (
+            vec![
+                text("a".repeat(100_000), &st),
+                text("。。".into(), &tiny_cjk),
+            ],
+            7.0,
+            100_000,
+        ),
     ] {
         let p = Paragraph {
             width,
@@ -1778,15 +1795,7 @@ fn long_lines_and_unbreakable_words_lay_out_in_linear_time() {
             direction: Direction::Ltr,
         };
         let start = std::time::Instant::now();
-        let t = layout(
-            &fonts,
-            &p,
-            &[Inline::Text {
-                text,
-                style: st.clone(),
-            }],
-        )
-        .unwrap_or_else(|e| panic!("{e}"));
+        let t = layout(&fonts, &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
         let elapsed = start.elapsed();
         assert_eq!(t.lines.len(), lines);
         assert!(

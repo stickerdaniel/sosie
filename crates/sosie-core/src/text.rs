@@ -240,7 +240,7 @@ struct Para<'a> {
     styles: Vec<Style>,
     g: Vec<G>,
     adv: Vec<f32>,
-    monotone: bool,
+    neg: Vec<f64>,
     item_break: Vec<bool>,
     shape_break: Vec<bool>,
     wrap: bool,
@@ -413,7 +413,7 @@ impl<'a> Para<'a> {
             styles,
             g,
             adv: Vec::new(),
-            monotone: false,
+            neg: Vec::new(),
             item_break,
             shape_break,
             wrap: para.strut.white_space != WhiteSpace::Pre,
@@ -427,7 +427,12 @@ impl<'a> Para<'a> {
             strut,
         };
         p.adv = p.shape_range(0, n);
-        p.monotone = p.adv.iter().all(|&a| a >= 0.0);
+        p.neg = std::iter::once(0.0)
+            .chain(p.adv.iter().scan(0.0, |sum, &a| {
+                *sum += a.min(0.0) as f64;
+                Some(*sum)
+            }))
+            .collect();
         p
     }
 
@@ -628,7 +633,8 @@ impl<'a> Para<'a> {
         let trim = if t > ls { self.end_trim(t) } else { 0.0 };
         while pen.k < t {
             self.step(pen, &self.adv[ls..]);
-            if self.monotone && pen.width() - trim > self.avail + 1.0 / 64.0 {
+            let ahead = (self.neg[t] - self.neg[pen.k]) as f32;
+            if pen.total + pen.item + ahead - trim > self.avail + 1.0 / 64.0 {
                 return false;
             }
         }

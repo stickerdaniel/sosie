@@ -98,6 +98,7 @@ impl Limits {
         let bytes = usize::try_from(pixels)
             .ok()
             .and_then(|p| p.checked_mul(4))
+            .filter(|&b| isize::try_from(b).is_ok())
             .ok_or(LimitError::Bytes { pixels })?;
         Ok((w as u32, h as u32, bytes))
     }

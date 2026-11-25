@@ -35,11 +35,13 @@ fn raised_limits_refuse_an_unaddressable_byte_count() {
         max_height_px: u32::MAX,
         max_pixels: u64::MAX,
     };
-    let list = DisplayList::new(2_147_483_648.0, 2_147_483_648.0, Rgba::WHITE);
-    assert_eq!(
-        rasterize(&Fonts::new(), &list, 1.0, &limits).map(|p| p.rgba.len()),
-        Err(RenderError::Limit(LimitError::Bytes { pixels: 1 << 62 }))
-    );
+    for (height, pixels) in [(2_147_483_648.0, 1 << 62), (1_073_741_824.0, 1 << 61)] {
+        let list = DisplayList::new(2_147_483_648.0, height, Rgba::WHITE);
+        assert_eq!(
+            rasterize(&Fonts::new(), &list, 1.0, &limits).map(|p| p.rgba.len()),
+            Err(RenderError::Limit(LimitError::Bytes { pixels }))
+        );
+    }
 }
 
 #[test]

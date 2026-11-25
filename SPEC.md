@@ -47,7 +47,7 @@ This file states what the core guarantees, how each guarantee is checked, and th
 
 ## Limits
 
-`Limits::default()` accepts a dpr from 1 to 4, a device width up to 8,192 px, a device height up to 32,768 px and up to 64M pixels. `rasterize` checks the device size with saturating arithmetic before it allocates. A size whose RGBA byte count does not fit in `usize` fails with `LimitError::Bytes`. A fill mask covers only the part of a shape inside the pixmap. Glyph and emoji blits clip with saturating 64-bit spans, so a glyph at any finite position outside the pixmap is skipped. The glyph cache holds at most 12 MiB and the emoji strike cache at most 64 MiB; a cache that would exceed its budget is emptied. A failed emoji lookup is not cached. Text length has no cap yet.
+`Limits::default()` accepts a dpr from 1 to 4, a device width up to 8,192 px, a device height up to 32,768 px and up to 64M pixels. `rasterize` checks the device size with saturating arithmetic before it allocates. A size whose RGBA byte count exceeds `isize::MAX` fails with `LimitError::Bytes`. A fill mask covers only the part of a shape inside the pixmap. Glyph and emoji blits clip with saturating 64-bit spans, so a glyph at any finite position outside the pixmap is skipped. The glyph cache holds at most 12 MiB and the emoji strike cache at most 64 MiB; a cache that would exceed its budget is emptied. A failed emoji lookup is not cached. Text length has no cap yet.
 
 ## Goldens
 

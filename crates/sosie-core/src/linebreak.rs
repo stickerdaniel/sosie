@@ -20,6 +20,13 @@ fn grapheme_segmenter() -> &'static GraphemeClusterSegmenterBorrowed<'static> {
     S.get_or_init(GraphemeClusterSegmenter::new)
 }
 
+fn ascii_break(bytes: &[u8], i: usize) -> bool {
+    match (bytes[i - 1], bytes[i]) {
+        (b'-', d) if d.is_ascii_digit() => i >= 2 && bytes[i - 2].is_ascii_alphanumeric(),
+        (a, b) => crate::blink_ascii::may_break(a, b),
+    }
+}
+
 pub fn line_breaks(text: &str) -> Vec<usize> {
     let mut out = Vec::new();
     if table_breaks(text, &mut out) {
@@ -31,7 +38,7 @@ pub fn line_breaks(text: &str) -> Vec<usize> {
 }
 
 fn table_breaks(text: &str, out: &mut Vec<usize>) -> bool {
-    use crate::blink_ascii::{may_break, FIRST, LAST};
+    use crate::blink_ascii::{FIRST, LAST};
     let bytes = text.as_bytes();
     let in_table = |b: u8| (FIRST..=LAST).contains(&b);
     let mut i = 1;
@@ -42,12 +49,7 @@ fn table_breaks(text: &str, out: &mut Vec<usize>) -> bool {
                 out.push(i);
             }
         } else if in_table(a) && in_table(b) {
-            let allowed = if a == b'-' && b.is_ascii_digit() {
-                i >= 2 && bytes[i - 2].is_ascii_alphanumeric()
-            } else {
-                may_break(a, b)
-            };
-            if allowed {
+            if ascii_break(bytes, i) {
                 out.push(i);
             }
         } else if in_table(a) && (b == b' ' || b == b'\t') {
@@ -60,7 +62,7 @@ fn table_breaks(text: &str, out: &mut Vec<usize>) -> bool {
 }
 
 fn general_breaks(text: &str, out: &mut Vec<usize>) {
-    use crate::blink_ascii::{may_break, FIRST, LAST};
+    use crate::blink_ascii::{FIRST, LAST};
     let len = text.len();
     let bytes = text.as_bytes();
     let in_table = |b: u8| (FIRST..=LAST).contains(&b);
@@ -76,12 +78,7 @@ fn general_breaks(text: &str, out: &mut Vec<usize>) {
                 out.push(i);
             }
         } else if in_table(a) && in_table(b) {
-            let allowed = if a == b'-' && b.is_ascii_digit() {
-                i >= 2 && bytes[i - 2].is_ascii_alphanumeric()
-            } else {
-                may_break(a, b)
-            };
-            if allowed {
+            if ascii_break(bytes, i) {
                 out.push(i);
             }
         } else {

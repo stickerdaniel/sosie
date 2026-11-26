@@ -3112,3 +3112,248 @@ fn unsafe_shaping_cuts_scale_linearly() {
         });
     }
 }
+
+type Part<'a> = (WhiteSpace, &'a str, Option<f32>);
+type LetterCase<'a> = (
+    (WhiteSpace, OverflowWrap, Direction),
+    f32,
+    &'a [Part<'a>],
+    f32,
+    &'a [(char, f32, f32)],
+);
+
+fn assert_chromium_letters(cases: &[LetterCase]) {
+    use WhiteSpace::Pre as P;
+    let (_, abc) = mono_run(
+        P,
+        OverflowWrap::Normal,
+        Direction::Ltr,
+        10.0,
+        &[(P, "abc")],
+        100.0,
+    );
+    for &((strut, overflow_wrap, direction), width, parts, height, chromium) in cases {
+        let spans: Vec<_> = parts
+            .iter()
+            .map(|&(ws, t, pad)| (ws, t, 16.0, pad))
+            .collect();
+        let (h, placed) = mono_padded((strut, 16.0), overflow_wrap, direction, 10.0, &spans, width);
+        let what = format!("{parts:?} {direction:?} at width {width}");
+        assert_eq!(h, height, "{what}: height");
+        let mut got: Vec<(char, f32, f32)> = placed
+            .iter()
+            .filter_map(|&(id, x, y)| {
+                let k = abc.iter().position(|g| g.0 == id)?;
+                Some((char::from(b'a' + k as u8), x, y))
+            })
+            .collect();
+        got.sort_by(|p, q| p.2.total_cmp(&q.2).then(p.1.total_cmp(&q.1)));
+        let mut want = chromium.to_vec();
+        want.sort_by(|p, q| p.2.total_cmp(&q.2).then(p.1.total_cmp(&q.1)));
+        assert_eq!(got.len(), want.len(), "{what}: letters {got:?}");
+        for (g, c) in got.iter().zip(&want) {
+            assert!(
+                g.0 == c.0 && (g.1 - c.1).abs() <= 1.0 / 64.0 && g.2 == c.2,
+                "{what}: {got:?}, Chromium {want:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_removed_leading_space_takes_no_width_when_fitting() {
+    use Direction::{Ltr, Rtl};
+    use WhiteSpace::{Normal as N, Pre as P, PreWrap as W};
+    let any = OverflowWrap::Anywhere;
+    assert_chromium_letters(&[
+        (
+            (N, any, Ltr),
+            13.25,
+            &[(P, "abc", None), (N, " c\u{200b}c a", None)],
+            48.0,
+            &[
+                ('a', 0.0, 10.0),
+                ('b', 6.0, 10.0),
+                ('c', 12.0, 10.0),
+                ('c', 0.0, 26.0),
+                ('c', 6.0, 26.0),
+                ('a', 0.0, 42.0),
+            ],
+        ),
+        (
+            (N, any, Rtl),
+            13.25,
+            &[(P, "abc", None), (N, " c\u{200b}c ac", None)],
+            48.0,
+            &[
+                ('a', -4.765625, 10.0),
+                ('b', 1.234375, 10.0),
+                ('c', 7.234375, 10.0),
+                ('c', 1.234375, 26.0),
+                ('c', 7.234375, 26.0),
+                ('a', 1.234375, 42.0),
+                ('c', 7.234375, 42.0),
+            ],
+        ),
+        (
+            (N, any, Rtl),
+            12.5,
+            &[(P, "abc", None), (N, " \u{200b}a \u{200b} c", None)],
+            48.0,
+            &[
+                ('a', -5.515625, 10.0),
+                ('b', 0.484375, 10.0),
+                ('c', 6.484375, 10.0),
+                ('a', 0.484375, 26.0),
+                ('c', 6.484375, 42.0),
+            ],
+        ),
+        (
+            (P, OverflowWrap::Normal, Rtl),
+            5.984375,
+            &[(W, "b", None), (N, " \u{200b}c", None)],
+            48.0,
+            &[('b', -0.03125, 10.0), ('c', -0.03125, 42.0)],
+        ),
+    ]);
+}
+
+#[test]
+fn trailing_collapsible_spaces_follow_chromium_in_rtl() {
+    use Direction::Rtl;
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
+    let normal = OverflowWrap::Normal;
+    assert_chromium_letters(&[
+        (
+            (B, normal, Rtl),
+            5.984375,
+            &[
+                (P, "a", None),
+                (N, "\u{200b} \r \n\u{200b}\r ", Some(6.53125)),
+                (P, "c a", None),
+            ],
+            32.0,
+            &[
+                ('a', -13.09375, 10.0),
+                ('c', -12.03125, 26.0),
+                ('a', -0.03125, 26.0),
+            ],
+        ),
+        (
+            (N, normal, Rtl),
+            25.0,
+            &[(N, "a a ", Some(0.5))],
+            16.0,
+            &[('a', 6.484375, 10.0), ('a', 18.484375, 10.0)],
+        ),
+        (
+            (N, normal, Rtl),
+            24.015625,
+            &[(P, "a", None), (N, "a ", Some(3.0)), (W, " c", None)],
+            32.0,
+            &[('a', 8.984375, 10.0), ('a', 15.0, 10.0), ('c', 18.0, 26.0)],
+        ),
+        (
+            (N, normal, Rtl),
+            24.015625,
+            &[
+                (P, "a", None),
+                (N, "\u{200b} ", Some(3.0)),
+                (W, " \u{200b}c", None),
+            ],
+            32.0,
+            &[('a', 15.0, 10.0), ('c', 18.0, 26.0)],
+        ),
+        (
+            (N, normal, Rtl),
+            24.015625,
+            &[(P, "a", None), (N, "aa ", Some(3.0)), (W, " c", None)],
+            32.0,
+            &[
+                ('a', -0.015625, 10.0),
+                ('a', 9.0, 10.0),
+                ('a', 15.0, 10.0),
+                ('c', 18.0, 26.0),
+            ],
+        ),
+    ]);
+}
+
+#[test]
+fn a_hyphen_breaks_before_a_digit_only_after_an_ascii_letter_or_digit() {
+    let p = para(
+        0.25,
+        WhiteSpace::Normal,
+        OverflowWrap::Normal,
+        Direction::Ltr,
+    );
+    let cases: [(&str, &[&str]); 9] = [
+        ("xa-1", &["xa-", "1"]),
+        ("x7-1", &["x7-", "1"]),
+        ("xZ-9", &["xZ-", "9"]),
+        ("x!-1", &["x!-1"]),
+        ("x--1", &["x-", "-1"]),
+        ("x -1", &["x", "-1"]),
+        ("-1", &["-1"]),
+        ("x\u{e9}-1", &["x\u{e9}-1"]),
+        ("x\u{4e2d}-1", &["x", "\u{4e2d}-1"]),
+    ];
+    for (t, want) in cases {
+        let l = layout(shared_fonts(), &p, &[text(t, WhiteSpace::Normal)])
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(lines(&l), want, "{t:?}");
+    }
+}
+
+#[test]
+fn the_padding_of_a_span_without_text_counts_once_on_its_own_line() {
+    use WhiteSpace::{Normal as N, Pre as P, PreWrap as W};
+    assert_chromium_letters(&[
+        (
+            (W, OverflowWrap::Anywhere, Direction::Rtl),
+            23.984375,
+            &[(N, " \r \t", Some(6.5)), (N, "\u{200b} \n\rc\t", None)],
+            16.0,
+            &[('c', 17.96875, 10.0)],
+        ),
+        (
+            (W, OverflowWrap::Anywhere, Direction::Rtl),
+            23.5,
+            &[
+                (N, "a", None),
+                (N, "", Some(6.5)),
+                (P, "ca\t ", Some(6.53125)),
+                (N, "\tcc", Some(6.53125)),
+            ],
+            48.0,
+            &[
+                ('a', 17.484375, 10.0),
+                ('c', 4.953125, 26.0),
+                ('a', 10.953125, 26.0),
+                ('c', 11.484375, 42.0),
+                ('c', 17.484375, 42.0),
+            ],
+        ),
+    ]);
+}
+
+#[test]
+fn a_line_breaks_between_a_space_and_a_crlf() {
+    use WhiteSpace::{Normal as N, Pre as P};
+    assert_chromium_letters(&[(
+        (P, OverflowWrap::Normal, Direction::Ltr),
+        24.5,
+        &[
+            (N, "abc ", None),
+            (P, "\r\n ", Some(3.0)),
+            (N, "\n\u{200b}\na", None),
+        ],
+        48.0,
+        &[
+            ('a', 0.0, 10.0),
+            ('b', 6.0, 10.0),
+            ('c', 12.0, 10.0),
+            ('a', 9.015625, 42.0),
+        ],
+    )]);
+}

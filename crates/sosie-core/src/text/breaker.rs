@@ -34,6 +34,7 @@ pub(super) struct Break {
     pub(super) start: usize,
     pub(super) end: usize,
     pub(super) skip: Option<usize>,
+    pub(super) collapsed: Vec<usize>,
     pub(super) spans: Vec<usize>,
 }
 
@@ -85,6 +86,7 @@ pub(super) struct Breaker<'b, 'a> {
     state: State,
     leading: bool,
     skip: Option<(usize, usize)>,
+    collapsed: Vec<usize>,
     forced: bool,
     res: Vec<Res>,
     position: f32,
@@ -212,13 +214,14 @@ impl<'b, 'a> Breaker<'b, 'a> {
             state: State::Continue,
             leading: true,
             skip: None,
+            collapsed: Vec::new(),
             forced: false,
             res: Vec::new(),
             position: 0.0,
             ls: 0,
             start: (0, 0),
             line_style: None,
-            pens: RefCell::new(vec![Pen::new(0)]),
+            pens: RefCell::new(vec![Pen::new(0, 0.0)]),
             memo: None,
         }
     }
@@ -233,7 +236,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
             self.position = 0.0;
             self.start = start;
             self.ls = self.off;
-            self.pens = RefCell::new(vec![Pen::new(self.ls)]);
+            self.pens = RefCell::new(vec![Pen::new(self.ls, self.empty_spans_gap())]);
             self.memo = None;
             self.over = false;
             self.forced = false;
@@ -278,6 +281,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
                     start: self.ls,
                     end: n,
                     skip: self.skip.map(|(_, k)| k),
+                    collapsed: std::mem::take(&mut self.collapsed),
                     spans,
                 },
             ));
@@ -295,6 +299,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
                     start,
                     end,
                     skip: b.skip.filter(|&k| k >= start),
+                    collapsed: b.collapsed,
                     spans: b.spans,
                 }
             })
@@ -316,11 +321,34 @@ impl<'b, 'a> Breaker<'b, 'a> {
         }
     }
 
+    fn set_skip(&mut self, skip: Option<(usize, usize)>) {
+        if let Some((_, k)) = skip.or(self.skip) {
+            self.pens.get_mut().truncate(k - self.ls + 1);
+        }
+        self.skip = skip;
+    }
+
+    fn empty_spans_gap(&self) -> f32 {
+        let Some(first) = self.p.g.get(self.ls) else {
+            return 0.0;
+        };
+        self.items[self.item..]
+            .iter()
+            .take_while(|it| it.a == self.ls && matches!(it.kind, Kind::Open | Kind::Close))
+            .filter(|it| it.kind == Kind::Open && it.span != first.span)
+            .map(|it| 2.0 * self.p.styles[it.span].pad)
+            .sum()
+    }
+
     fn base(&self, k: usize) -> f32 {
         let mut pens = self.pens.borrow_mut();
         while pens.len() <= k - self.ls {
             let mut pen = *pens.last().expect("pens start with the line start");
-            self.p.step(&mut pen, &self.p.adv[self.ls..]);
+            let skip = self.skip.map(|(_, j)| j);
+            self.p.step_by(
+                &mut pen,
+                |j| if Some(j) == skip { 0.0 } else { self.p.adv[j] },
+            );
             pens.push(pen);
         }
         pens[k - self.ls].width()
@@ -331,7 +359,12 @@ impl<'b, 'a> Breaker<'b, 'a> {
             return 0.0;
         }
         let g = &self.p.g;
-        self.base(b) - self.base(a) - g[a].gap_before - g[a].pad_before - g[b - 1].pad_after
+        let gap = if a == self.ls {
+            self.pens.borrow()[0].gap
+        } else {
+            g[a].gap_before
+        };
+        self.base(b) - self.base(a) - gap - g[a].pad_before - g[b - 1].pad_after
     }
 
     fn breakable(&self, k: usize) -> bool {
@@ -345,23 +378,12 @@ impl<'b, 'a> Breaker<'b, 'a> {
         if k >= g.len() || self.char_break {
             return true;
         }
-        let (last, cur) = (sp(&g[k - 1]), sp(&g[k]));
-        if self.every {
-            if last {
-                return true;
-            }
-            if cur {
-                return false;
-            }
-        } else {
-            if cur {
-                return false;
-            }
-            if last {
-                return true;
-            }
+        let cr_first = g[k].nl && self.p.text[g[k].start..g[k].end].starts_with('\r');
+        match (sp(&g[k - 1]), sp(&g[k]) && !cr_first) {
+            (true, space) => self.every || !space,
+            (false, true) => false,
+            (false, false) => !g[k - 1].cr && !g[k].cr && self.icu[k],
         }
-        !g[k - 1].cr && !g[k].cr && self.icu[k]
     }
 
     fn hang_start(&self, e: usize) -> usize {
@@ -389,7 +411,9 @@ impl<'b, 'a> Breaker<'b, 'a> {
     }
 
     fn exact_fits(&mut self, end: usize) -> bool {
-        let w = self.p.remeasure(self.ls, end, &mut self.memo);
+        let skip = self.skip.map(|(_, k)| k);
+        let start = self.pens.get_mut()[0];
+        let w = self.p.remeasure(start, end, skip, &mut self.memo);
         fits(w, self.p.avail)
     }
 
@@ -602,7 +626,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
         }
         if self.leading && self.ws(Some(it.span)) == WhiteSpace::Normal && self.p.g[self.off].space
         {
-            self.skip = Some((self.res.len(), self.off));
+            self.set_skip(Some((self.res.len(), self.off)));
             self.off += 1;
             if self.off == it.b {
                 self.handle_empty(ii);
@@ -681,6 +705,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
                     self.state = State::Done;
                     return;
                 }
+                self.collapsed.push(c0);
                 self.off = c0 + 1;
                 self.leading = false;
                 if let Some(last) = self.res.last_mut() {
@@ -852,7 +877,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
             self.set_style(st);
         }
         self.res.truncate(new_end);
-        self.skip = self.skip.filter(|&(j, _)| j < new_end);
+        self.set_skip(self.skip.filter(|&(j, _)| j < new_end));
         self.position = self.res.iter().map(|r| r.w).sum();
     }
 
@@ -1016,6 +1041,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
         self.state = State::Continue;
         self.leading = true;
         self.skip = None;
+        self.collapsed.clear();
         while self.state != State::Done {
             if self.item >= self.items.len() {
                 if self.handle_overflow_if_needed() && self.item < self.items.len() {

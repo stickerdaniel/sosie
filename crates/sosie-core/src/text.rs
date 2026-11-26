@@ -199,6 +199,7 @@ fn clamp_trim(a: f32, (lead, tail): &mut (f32, f32)) -> f32 {
 
 struct Remeasure {
     t: usize,
+    skip: Option<usize>,
     reshapes: usize,
     width: f32,
     raw: Vec<f32>,
@@ -240,15 +241,17 @@ struct G {
 struct Pen {
     ls: usize,
     k: usize,
+    gap: f32,
     total: f32,
     item: f32,
 }
 
 impl Pen {
-    fn new(ls: usize) -> Self {
+    fn new(ls: usize, gap: f32) -> Self {
         Pen {
             ls,
             k: ls,
+            gap,
             total: 0.0,
             item: 0.0,
         }
@@ -468,6 +471,9 @@ fn collapse(
                 last = End::Kept;
             }
         }
+    }
+    if let End::Collapsible { space: true, .. } = last {
+        out.remove_space(false);
     }
     let Collapsed { text, mut span_of } = out;
     span_of.push(styles.len().saturating_sub(1));
@@ -783,8 +789,9 @@ impl<'a> Para<'a> {
             pen.item = 0.0;
         }
         let g = &self.g[k];
-        if g.gap_before > 0.0 {
-            pen.total += ceil64(pen.item) + g.gap_before;
+        let gap = if k == pen.ls { pen.gap } else { g.gap_before };
+        if gap > 0.0 {
+            pen.total += ceil64(pen.item) + gap;
             pen.item = 0.0;
         }
         if g.pad_before > 0.0 {
@@ -808,7 +815,7 @@ impl<'a> Para<'a> {
     }
 
     fn walk(&self, ls: usize, t: usize, adv: &[f32]) -> (f32, Vec<(f32, f32)>) {
-        let mut pen = Pen::new(ls);
+        let mut pen = Pen::new(ls, self.g.get(ls).map_or(0.0, |g| g.gap_before));
         let pos = (ls..t).map(|_| self.step(&mut pen, adv)).collect();
         (pen.width(), pos)
     }
@@ -833,15 +840,24 @@ impl<'a> Para<'a> {
         }
     }
 
-    fn remeasure(&self, ls: usize, le: usize, memo: &mut Option<Remeasure>) -> f32 {
+    fn remeasure(
+        &self,
+        start: Pen,
+        le: usize,
+        skip: Option<usize>,
+        memo: &mut Option<Remeasure>,
+    ) -> f32 {
+        let ls = start.ls;
         let t = self.trail(ls, le);
         if t == ls {
             return 0.0;
         }
-        if let Some(r) = memo
-            .as_ref()
-            .filter(|r| t <= r.t && (t == r.t || r.safe[t - ls] || r.reshapes >= RESHAPES_PER_LINE))
-        {
+        let skip = skip.filter(|&k| k < t);
+        if let Some(r) = memo.as_ref().filter(|r| {
+            r.skip == skip
+                && t <= r.t
+                && (t == r.t || r.safe[t - ls] || r.reshapes >= RESHAPES_PER_LINE)
+        }) {
             if t == r.t {
                 return r.width;
             }
@@ -853,14 +869,17 @@ impl<'a> Para<'a> {
             return self.trimmed_width(pen.width(), ls, t);
         }
         let mut safe = Vec::new();
-        let raw = self.raw_range(ls, t, Some(&mut safe));
+        let mut raw = self.raw_range(ls, t, Some(&mut safe));
+        if let Some(k) = skip {
+            raw[k - ls] = 0.0;
+        }
         let mut trims = self.han_trim(ls, t);
         let adv: Vec<f32> = raw
             .iter()
             .zip(&mut trims)
             .map(|(&a, trim)| clamp_trim(a, trim))
             .collect();
-        let mut pen = Pen::new(ls);
+        let mut pen = start;
         let mut pens = Vec::with_capacity(t - ls + 1);
         pens.push(pen);
         for _ in ls..t {
@@ -871,6 +890,7 @@ impl<'a> Para<'a> {
         let reshapes = memo.as_ref().map_or(0, |r| r.reshapes + 1);
         *memo = Some(Remeasure {
             t,
+            skip,
             reshapes,
             width,
             raw,
@@ -931,6 +951,12 @@ impl<'a> Para<'a> {
             .map(|k| self.g[k].pad_after)
             .sum();
         let full = full + hang_pad;
+        let normal = |k: usize| self.styles[self.g[k].span].ws == WhiteSpace::Normal;
+        let hang_run = hang_pad > 0.0
+            && (t..le).any(|k| !normal(k))
+            && (t..le).any(|k| {
+                normal(k) && self.g[k].span == self.g[t - 1].span && !b.collapsed.contains(&k)
+            });
         let soft = le < self.g.len() && !self.g[le].nl;
         let trim = if (self.wrap || soft) && full > self.avail && t > ls {
             self.end_trim(t)
@@ -940,7 +966,7 @@ impl<'a> Para<'a> {
         if let Some(p) = pos.last_mut() {
             p.1 -= trim;
         }
-        let vpos = self.visual(ls, t, le, hang_pad, skip, &pos);
+        let vpos = self.visual(ls, t, le, (hang_pad, hang_run), skip, &pos);
         let ink: Vec<usize> = (ls..t)
             .filter(|&k| !self.g[k].space && !self.g[k].tab && !self.g[k].cr)
             .collect();
@@ -1116,7 +1142,7 @@ impl<'a> Para<'a> {
         ls: usize,
         t: usize,
         le: usize,
-        hang_pad: f32,
+        (hang_pad, hang_run): (f32, bool),
         skip: Option<usize>,
         pos: &[(f32, f32)],
     ) -> Vec<(f32, f32)> {
@@ -1152,19 +1178,23 @@ impl<'a> Para<'a> {
                 }
             }
         }
+        let hang = if hang_run {
+            levels.push(base);
+            groups.len()
+        } else {
+            groups.len().saturating_sub(1)
+        };
         let mut vpos = pos.to_vec();
         let mut cursor = 0.0f32;
         let order = visual_order(&levels);
-        let span = |gi: usize| self.g[groups[gi].0].span;
+        let span = |gi: usize| self.g[groups.get(gi).map_or(t - 1, |g| g.0)].span;
         for run in order.chunk_by(|&x, &y| span(x) == span(y)) {
-            let start: f32 = run.iter().map(|&gi| self.g[groups[gi].0].pad_before).sum();
-            let end: f32 = run
-                .iter()
-                .map(|&gi| {
-                    let b = groups[gi].1;
-                    self.g[b - 1].pad_after + if b == t { hang_pad } else { 0.0 }
-                })
-                .sum();
+            let groups_of = || run.iter().filter_map(|&gi| groups.get(gi));
+            let start: f32 = groups_of().map(|&(a, _)| self.g[a].pad_before).sum();
+            let end: f32 = groups_of()
+                .map(|&(_, b)| self.g[b - 1].pad_after)
+                .sum::<f32>()
+                + if run.contains(&hang) { hang_pad } else { 0.0 };
             let (pad_left, pad_right) = if self.rtl_base {
                 (end, start)
             } else {
@@ -1172,7 +1202,9 @@ impl<'a> Para<'a> {
             };
             cursor += pad_left;
             for &gi in run {
-                let (a, b) = groups[gi];
+                let Some(&(a, b)) = groups.get(gi) else {
+                    continue;
+                };
                 let odd = levels[gi] % 2 == 1;
                 if !odd {
                     cursor += self.g[a].gap_before;

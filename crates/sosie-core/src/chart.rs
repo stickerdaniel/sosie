@@ -734,10 +734,11 @@ pub fn render(
         None => None,
     };
     let scale = |unit: &str| {
+        let unit = collapse_white_space(unit);
         chart
             .metrics()
             .iter()
-            .filter(|m| m.unit == unit)
+            .filter(|m| collapse_white_space(&m.unit) == unit)
             .map(|m| m.before.abs().max(m.after.abs()))
             .fold(0.0, f64::max)
     };

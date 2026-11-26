@@ -382,7 +382,7 @@ fn the_reference_chart_has_the_css_geometry() {
 fn metrics_with_one_unit_share_a_scale() {
     let metrics = vec![
         metric("Small", "ms", 50.0, 40.0, true),
-        metric("Large", "ms", 400.0, 500.0, true),
+        metric("Large", " ms\n", 400.0, 500.0, true),
         metric("Bundle", "kB", 2.0, 3.0, true),
     ];
     let segments = segments(&list(&chart(None, metrics)));

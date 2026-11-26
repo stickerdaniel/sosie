@@ -733,17 +733,20 @@ pub fn render(
         }
         None => None,
     };
-    let scale = chart
-        .metrics()
-        .iter()
-        .map(|m| m.before.abs().max(m.after.abs()))
-        .fold(0.0, f64::max);
+    let scale = |unit: &str| {
+        chart
+            .metrics()
+            .iter()
+            .filter(|m| m.unit == unit)
+            .map(|m| m.before.abs().max(m.after.abs()))
+            .fold(0.0, f64::max)
+    };
     let rows = chart
         .metrics()
         .iter()
         .enumerate()
         .map(|(index, metric)| {
-            Row::new(&set, palette, metric, scale)
+            Row::new(&set, palette, metric, scale(&metric.unit))
                 .map_err(|error| ChartError::Metric { index, error })
         })
         .collect::<Result<Vec<_>, _>>()?;

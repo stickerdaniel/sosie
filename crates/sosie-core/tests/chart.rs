@@ -328,15 +328,14 @@ fn the_reference_chart_has_the_css_geometry() {
     assert_eq!(tracks(&list), rows);
     let segments = segments(&list);
     assert_eq!(segments.len(), 9);
-    let scale = 1136.0;
-    let px = |v: f64| 268.0 * v / scale;
+    let ms = |v: f64| 268.0 * v / 1136.0;
     let (stripes, outline) = (hex("#1f883d73"), hex("#1f883d8c"));
     let decrease = |at: usize, row: Rect, after: f64, before: f64| {
         assert_segment(
             &segments[at],
             Ink::Solid(hex(SUCCESS)),
             283.0,
-            px(after),
+            ms(after),
             SQUARE,
             row,
         );
@@ -344,8 +343,8 @@ fn the_reference_chart_has_the_css_geometry() {
             assert_segment(
                 &segments[at + s],
                 ink,
-                283.0 + px(after),
-                px(before - after),
+                283.0 + ms(after),
+                ms(before - after),
                 ROUND_RIGHT,
                 row,
             );
@@ -357,15 +356,15 @@ fn the_reference_chart_has_the_css_geometry() {
         &segments[6],
         Ink::Solid(hex(EMPHASIS)),
         283.0,
-        px(292.5),
+        268.0 * 292.5 / 297.2,
         SQUARE,
         rows[2],
     );
     assert_segment(
         &segments[7],
         Ink::Solid(hex(DANGER)),
-        283.0 + px(292.5),
-        px(297.2 - 292.5),
+        283.0 + 268.0 * 292.5 / 297.2,
+        268.0 * (297.2 - 292.5) / 297.2,
         SQUARE,
         rows[2],
     );
@@ -373,22 +372,32 @@ fn the_reference_chart_has_the_css_geometry() {
         &segments[8],
         Ink::Solid(hex(EMPHASIS)),
         283.0,
-        px(91.0),
+        268.0,
         SQUARE,
         rows[3],
     );
 }
 
 #[test]
-fn one_scale_spans_every_row() {
+fn metrics_with_one_unit_share_a_scale() {
     let metrics = vec![
         metric("Small", "ms", 50.0, 40.0, true),
         metric("Large", "ms", 400.0, 500.0, true),
+        metric("Bundle", "kB", 2.0, 3.0, true),
     ];
     let segments = segments(&list(&chart(None, metrics)));
-    let px = |v: f64| 268.0 * v / 500.0;
+    let ms = |v: f64| 268.0 * v / 500.0;
+    let kb = |v: f64| 268.0 * v / 3.0;
     let widths: Vec<f64> = segments.iter().map(|s| f64::from(s.w)).collect();
-    let want = [px(40.0), px(10.0), px(10.0), px(400.0), px(100.0)];
+    let want = [
+        ms(40.0),
+        ms(10.0),
+        ms(10.0),
+        ms(400.0),
+        ms(100.0),
+        kb(2.0),
+        kb(1.0),
+    ];
     assert_eq!(widths.len(), want.len());
     for (got, want) in widths.into_iter().zip(want) {
         assert!((got - want).abs() < 1e-4, "{got} vs {want}");
@@ -907,7 +916,7 @@ fn a_thin_fill_and_its_stripes_stay_inside_the_rounded_track() {
 
 #[test]
 fn segments_take_the_tone_colors() {
-    let points = [(700, 135), (635, 303), (705, 303), (580, 387)];
+    let points = [(700, 135), (635, 303), (1098, 303), (580, 387)];
     for (theme, colors) in [
         (Theme::Light, [SUCCESS, EMPHASIS, DANGER, EMPHASIS]),
         (Theme::Dark, ["#238636", "#656c76", "#da3633", "#656c76"]),

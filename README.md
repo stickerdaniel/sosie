@@ -8,7 +8,8 @@ The repository is private and under construction.
 
 | Path | Content |
 | --- | --- |
-| `crates/sosie-core` | text layout, font selection, display list and raster |
+| `crates/sosie-core` | text layout, font selection, display list, raster, WebP and PNG |
+| `crates/sosie-cli` | the `sosie` binary: `sosie chart <metrics.json> <out-prefix>` writes metric bars as WebP or PNG |
 | `assets/fonts` | the pinned fonts and their licenses |
 | `tests/golden` | Chromium goldens: geometry in git, PNGs in a pinned release asset |
 | `tools/oracle` | the reference container and the capture harness |

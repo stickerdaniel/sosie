@@ -1,0 +1,16 @@
+[package]
+name = "sosie-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Command line for sosie: metric bar charts as WebP or PNG."
+
+[[bin]]
+name = "sosie"
+path = "src/main.rs"
+
+[dependencies]
+sosie-core = { path = "../sosie-core" }
+serde_json = "1"

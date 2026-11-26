@@ -19,7 +19,7 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: forbid(unsafe_code) in every crate
         run: tools/check-forbid-unsafe.sh
       - name: Golden stamps
@@ -32,19 +32,36 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x64
+            arch: x86_64
           - os: macos-latest
             target: darwin-arm64
+            arch: arm64
     name: test (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Toolchain and architecture
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          rustc -vV
+          uname -m
+          test "$(uname -m)" = "$ARCH"
+      - name: AVX2 on the runner
+        if: runner.os == 'Linux'
+        run: grep -qw avx2 /proc/cpuinfo
       - name: Fetch pinned pixel bundles
         env:
           GH_TOKEN: ${{ github.token }}
         run: tools/fetch-goldens.sh
       - name: Tests, golden parity and determinism
-        run: cargo test --workspace --release -- --nocapture
+        run: cargo test --workspace --release --locked -- --nocapture
+      - name: WebP determinism without AVX2
+        if: runner.os == 'Linux'
+        env:
+          IMAGE_WEBP_NO_AVX2: "1"
+        run: cargo test -p sosie-core --release --locked --test determinism
       - name: Overflow-checked tests in a debug build
-        run: cargo test --workspace --lib --test layout --test limits
+        run: cargo test --workspace --locked --lib --test layout --test limits
       - name: Text bench
-        run: cargo run --release --example bench_text
+        run: cargo run --release --locked --example bench_text

@@ -5,9 +5,18 @@ This file states what the core guarantees, how each guarantee is checked, and th
 ## Scope of the text and paint core
 
 - Input: a paragraph of styled inline spans and inline boxes, laid out at a CSS width.
-- Output: line geometry, a display list, and an RGBA pixmap or PNG at a device pixel ratio from 1 to 4.
-- PNG output is lossless: 8-bit RGBA, compressed at png's `Balanced` level with `Adaptive` filters. It decodes to the pixmap byte for byte, checked by `png_decodes_to_the_rasterized_pixels`.
+- Output: line geometry, a display list, and an RGBA pixmap, WebP or PNG at a device pixel ratio from 1 to 4.
 - The core opens no file, makes no network call, and reads no clock. Every crate root carries `#![forbid(unsafe_code)]`, checked by `tools/check-forbid-unsafe.sh`.
+
+## Output
+
+`encode(&pixmap, Format)` writes WebP or PNG. Both are lossless and decode to the pixmap byte for byte, checked by `encoded_images_decode_to_the_pixmap`.
+
+- WebP: VP8L lossless from image-webp 0.2.4, a Rust port of libwebp 1.6.0's lossless encoder (`github.com/marcbachmann/image-webp`, commit `f99a7c20abce962bfcc7950792fe27e1d1a9b6bc`). Settings: method 4, quality 75, `exact` on, so fully transparent pixels keep their RGB, near-lossless 100, fast mode off. Each side is at most 16,383 px, else `EncodeError::TooLarge`.
+- PNG: 8-bit RGBA, compressed at png's `Balanced` level with `Adaptive` filters by flate2's pure-Rust backend. `encode_png` returns the same bytes.
+- `encode` checks the pixmap before it calls an encoder: a zero side is `EncodeError::Empty`, an RGBA length other than width × height × 4 is `EncodeError::Buffer`. An encoder failure or empty output is `EncodeError::Encoder`.
+- The port computes some entropy estimates with `f64::ln`, a system libm call, for histogram counts of 65,536 and more. The raster rule that no float library call reaches the output therefore does not cover WebP bytes. The cross-platform hash gate in Determinism covers them.
+- The port's SIMD kernels use `unsafe`. On x86_64 it picks AVX2 at runtime unless `IMAGE_WEBP_NO_AVX2` is set.
 
 ## Fonts
 
@@ -124,7 +133,14 @@ Text captures: 384. Fill captures: 96. 56 captures lie above B, none above 1.5 %
 
 ### Determinism
 
-`crates/sosie-core/tests/determinism.json` pins the PNG SHA-256 of four text cases (ASCII, emoji, CJK, RTL) at 784 px and of the reference chart in light and dark at 814 px, all at dpr 2. The same hashes hold on linux-x64 and darwin-arm64. CI runs the test on both.
+`crates/sosie-core/tests/determinism.json` pins the PNG and the WebP SHA-256 of each case under `<case>.png` and `<case>.webp`:
+
+- four text cases (ASCII, emoji, CJK, RTL) at 784 px and the reference chart in light and dark at 814 px, all at dpr 2;
+- `gradient-333x77`, an odd-sized gradient;
+- `transparent-64x48`, fully transparent pixels with non-zero RGB;
+- `flat-400x200`, more than 256 colors and 78,400 pixels of one color, which reaches the port's `f64::ln` path.
+
+One hash set holds on linux-x64 and darwin-arm64. CI runs the test on both, and on linux-x64 a second time with `IMAGE_WEBP_NO_AVX2=1`, which turns off the port's AVX2 kernels.
 
 ## Bench
 

@@ -5,7 +5,7 @@
 use crate::color::Rgba;
 use crate::display::{DisplayList, GlyphPos, Item};
 use crate::fonts::{FaceId, Family, FamilyList, Fonts};
-use crate::{linebreak, script, shape, work};
+use crate::{linebreak, script, shape};
 use std::ops::Range;
 use unicode_bidi::{BidiClass, BidiInfo, Level};
 
@@ -671,7 +671,6 @@ impl<'a> Para<'a> {
     }
 
     fn shape_into(&self, a: usize, b: usize, glyphs: &mut Vec<shape::ShapedGlyph>) {
-        work::tick(b - a);
         let first = &self.g[a];
         let st = &self.styles[first.span];
         let sub = &self.text[first.start..self.g[b - 1].end];
@@ -727,7 +726,6 @@ impl<'a> Para<'a> {
                 });
                 let guessed = script::hb_script(first.script).is_none();
                 for k in a + 1..b {
-                    work::tick(1);
                     let at = self.g[k].start - ta;
                     let clean = starts
                         .binary_search_by_key(&at, |&(c, _)| c)
@@ -762,7 +760,6 @@ impl<'a> Para<'a> {
                 let g1 = bounds.partition_point(|&o| o < next).max(g0 + 1).min(m);
                 let share = sum / (g1 - g0) as f32;
                 for k in g0..g1 {
-                    work::tick(1);
                     adv[a - ls + k] += share;
                 }
             }
@@ -807,7 +804,6 @@ impl<'a> Para<'a> {
             }
         };
         let mut trim = vec![(0.0f32, 0.0f32); le.saturating_sub(ls)];
-        work::tick(trim.len());
         for k in ls + 1..le {
             let (a, b) = (kind(k - 1), kind(k));
             let half = |k: usize| self.styles[self.g[k].span].size / 2.0;
@@ -845,7 +841,6 @@ impl<'a> Para<'a> {
     }
 
     fn step_by(&self, pen: &mut Pen, adv: impl Fn(usize) -> f32) -> (f32, f32) {
-        work::tick(1);
         let k = pen.k;
         if k > pen.ls && self.item_break[k] {
             pen.total += ceil64(pen.item);
@@ -897,7 +892,6 @@ impl<'a> Para<'a> {
 
     fn trail(&self, ls: usize, mut le: usize) -> usize {
         while le > ls && self.g[le - 1].hang {
-            work::tick(1);
             le -= 1;
         }
         le
@@ -1067,7 +1061,6 @@ impl<'a> Para<'a> {
         let mut prev = None;
         let graphemes = (ls..le).map(|k| self.g[k].span);
         for span in graphemes.chain(spans.iter().copied()) {
-            work::tick(1);
             if prev == Some(span) {
                 continue;
             }
@@ -1144,7 +1137,6 @@ impl<'a> Para<'a> {
                     }
                     if j == i || glyphs[j - 1].cluster != glyphs[j].cluster {
                         for k in ks {
-                            work::tick(1);
                             start = start.min(vpos[k - ls].0);
                         }
                     }
@@ -1158,7 +1150,6 @@ impl<'a> Para<'a> {
                     if g == 0 || glyphs[g - 1].cluster != gl.cluster {
                         let before;
                         (before, after) = graphemes(gl.cluster).fold((0.0, 0.0), |(b, a), k| {
-                            work::tick(1);
                             (b + trims[k - ls].0, a + trims[k - ls].1)
                         });
                         x -= before;
@@ -1305,7 +1296,6 @@ impl<'a> Para<'a> {
                 let left = pos[a - ls].0;
                 let right = pos[b - 1 - ls].1;
                 for k in a..b {
-                    work::tick(1);
                     let (x0, x1) = pos[k - ls];
                     vpos[k - ls] = if odd {
                         (cursor + (right - x1), cursor + (right - x0))

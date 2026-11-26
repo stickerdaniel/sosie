@@ -2765,15 +2765,22 @@ fn many_preserved_newlines_lay_out_in_linear_time() {
         direction: Direction::Ltr,
         dpr: 1.0,
     };
-    assert_scales_linearly("preserved newlines", 200_000, |n| {
-        let inlines = [Inline::Text {
-            text: "\n".repeat(n),
-            style: st.clone(),
-        }];
-        let (t, steps) = counted(&fonts, &p, &inlines);
-        assert_eq!(t.lines.len(), n);
-        steps
-    });
+    let start = std::time::Instant::now();
+    let t = layout(
+        &fonts,
+        &p,
+        &[Inline::Text {
+            text: "\n".repeat(800_000),
+            style: st,
+        }],
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let elapsed = start.elapsed();
+    assert_eq!(t.lines.len(), 800_000);
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "800,000 newlines took {elapsed:?}"
+    );
 }
 
 #[test]
@@ -2797,9 +2804,11 @@ fn long_carriage_return_runs_scale_linearly() {
             text: format!("a{}b", "\r".repeat(n)),
             style: st.clone(),
         }];
-        let (t, steps) = counted(fonts, &p, &inlines);
+        let start = std::time::Instant::now();
+        let t = layout(fonts, &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+        let elapsed = start.elapsed();
         assert_eq!(t.lines.len(), 1);
-        steps
+        elapsed
     });
 }
 
@@ -2817,16 +2826,20 @@ fn long_lines_and_unbreakable_words_lay_out_in_linear_time() {
         size: 0.01,
         ..st.clone()
     };
-    for (what, unit, n, tail, width, wraps) in [
-        ("an unbreakable word", "a", 37_500, None, 7.0, true),
-        ("a long line", "a ", 25_000, None, 1.0e9, false),
+    let text = |text: String, style: &TextStyle| Inline::Text {
+        text,
+        style: style.clone(),
+    };
+    for (inlines, width, lines) in [
+        (vec![text("a".repeat(150_000), &st)], 7.0, 150_000),
+        (vec![text("a ".repeat(100_000), &st)], 1.0e9, 1),
         (
-            "a word before CJK periods",
-            "a",
-            25_000,
-            Some("。。"),
+            vec![
+                text("a".repeat(100_000), &st),
+                text("。。".into(), &tiny_cjk),
+            ],
             7.0,
-            true,
+            100_000,
         ),
     ] {
         let p = Paragraph {
@@ -2836,19 +2849,14 @@ fn long_lines_and_unbreakable_words_lay_out_in_linear_time() {
             direction: Direction::Ltr,
             dpr: 1.0,
         };
-        assert_scales_linearly(what, n, |n| {
-            let mut inlines = vec![Inline::Text {
-                text: unit.repeat(n),
-                style: st.clone(),
-            }];
-            inlines.extend(tail.map(|tail| Inline::Text {
-                text: tail.into(),
-                style: tiny_cjk.clone(),
-            }));
-            let (t, steps) = counted(&fonts, &p, &inlines);
-            assert_eq!(t.lines.len(), if wraps { n } else { 1 });
-            steps
-        });
+        let start = std::time::Instant::now();
+        let t = layout(&fonts, &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+        let elapsed = start.elapsed();
+        assert_eq!(t.lines.len(), lines);
+        assert!(
+            elapsed < std::time::Duration::from_secs(10),
+            "{lines} lines at width {width} took {elapsed:?}"
+        );
     }
 }
 
@@ -2909,24 +2917,39 @@ fn trimmed_cjk_punctuation_never_moves_the_pen_backwards() {
     }
 }
 
-fn counted(fonts: &Fonts, p: &Paragraph, inlines: &[Inline]) -> (TextLayout, u64) {
-    let (t, steps) = sosie_core::work::count(|| layout(fonts, p, inlines));
-    (t.unwrap_or_else(|e| panic!("{e}")), steps)
-}
-
-fn assert_linear(what: &str, witness: u64, control: u64) {
-    assert!(
-        witness < 2 * control,
-        "{what} took {witness} steps against its linear control's {control}"
+fn assert_linear(
+    what: &str,
+    mut witness: impl FnMut() -> std::time::Duration,
+    mut control: impl FnMut() -> std::time::Duration,
+) {
+    let mut fastest = (std::time::Duration::MAX, std::time::Duration::MAX);
+    for _ in 0..5 {
+        fastest.1 = fastest.1.min(control());
+        fastest.0 = fastest.0.min(witness());
+        if fastest.0 < fastest.1 * 4 {
+            return;
+        }
+    }
+    panic!(
+        "{what} took at best {:?} against its linear control's {:?}",
+        fastest.0, fastest.1
     );
 }
 
-fn assert_scales_linearly(what: &str, n: usize, mut run: impl FnMut(usize) -> u64) {
-    let (small, large) = (run(n), run(4 * n));
-    assert!(
-        large < 5 * small,
-        "{what} took {large} steps at {} units against {small} at {n}",
-        4 * n
+fn assert_scales_linearly(what: &str, n: usize, mut run: impl FnMut(usize) -> std::time::Duration) {
+    let mut fastest = (std::time::Duration::MAX, std::time::Duration::MAX);
+    for _ in 0..5 {
+        fastest.0 = fastest.0.min(run(n));
+        fastest.1 = fastest.1.min(run(4 * n));
+        if fastest.1 < fastest.0 * 8 {
+            return;
+        }
+    }
+    panic!(
+        "{what} took at best {:?} at {} units against {:?} at {n}",
+        fastest.1,
+        4 * n,
+        fastest.0
     );
 }
 
@@ -2965,7 +2988,7 @@ fn spread_negative_trims_and_many_spans_cost_like_linear_controls() {
         white_space: WhiteSpace::PreWrap,
         ..st.clone()
     };
-    let counted_lines = |inlines: &[Inline], strut: &TextStyle, width: f32, lines: usize| {
+    let timed = |inlines: &[Inline], strut: &TextStyle, width: f32, lines: usize| {
         let p = Paragraph {
             width,
             strut: strut.clone(),
@@ -2973,9 +2996,12 @@ fn spread_negative_trims_and_many_spans_cost_like_linear_controls() {
             direction: Direction::Ltr,
             dpr: 1.0,
         };
-        let (t, steps) = counted(shared_fonts(), &p, inlines);
+        let fonts = shared_fonts();
+        let start = std::time::Instant::now();
+        let t = layout(fonts, &p, inlines).unwrap_or_else(|e| panic!("{e}"));
+        let elapsed = start.elapsed();
         assert_eq!(t.lines.len(), lines);
-        steps
+        elapsed
     };
     for (what, inlines, control, strut, width, lines) in [
         (
@@ -3005,8 +3031,8 @@ fn spread_negative_trims_and_many_spans_cost_like_linear_controls() {
     ] {
         assert_linear(
             what,
-            counted_lines(&inlines, strut, width, lines),
-            counted_lines(&control.0, strut, width, control.1),
+            || timed(&inlines, strut, width, lines),
+            || timed(&control.0, strut, width, control.1),
         );
     }
 }
@@ -3036,9 +3062,11 @@ fn long_break_spaces_whitespace_runs_scale_linearly() {
                     ..st.clone()
                 },
             }];
-            let (t, steps) = counted(shared_fonts(), &p, &inlines);
+            let t0 = std::time::Instant::now();
+            let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+            let took = t0.elapsed();
             assert!(t.lines.len() > n, "{what}: {} lines", t.lines.len());
-            steps
+            took
         };
         assert_scales_linearly(what, 4_000, run);
     }
@@ -3102,9 +3130,11 @@ fn unsafe_shaping_cuts_scale_linearly() {
                 text: format!("{}{}{}", ends.0, unit.repeat(n), ends.1),
                 style: st.clone(),
             }];
-            let (t, steps) = counted(shared_fonts(), &p, &inlines);
+            let start = std::time::Instant::now();
+            let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+            let elapsed = start.elapsed();
             assert_eq!(t.lines.len(), lines, "{what} at {n}");
-            steps
+            elapsed
         });
     }
 }

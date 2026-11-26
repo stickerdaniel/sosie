@@ -1996,9 +1996,30 @@ fn whitespace_before_a_forced_break_in_the_next_span_does_not_hang() {
         assert_at(&what, mono_at(&placed, "c"), (0.0, baseline));
     }
     type Padded = &'static [(WhiteSpace, &'static str, f32, Option<f32>)];
-    let padded: [(f32, Padded, (f32, f32)); 7] = [
+    let padded: [(f32, Padded, (f32, f32)); 14] = [
         (0.75, &[(B, " \nc", 16.0, Some(0.0))], (48.0, 42.0)),
         (0.75, &[(B, "  \nc", 16.0, Some(0.0))], (64.0, 58.0)),
+        (1.25, &[(B, "\t \nc", 16.0, None)], (48.0, 42.0)),
+        (1.25, &[(B, "a   \nc", 16.0, None)], (64.0, 58.0)),
+        (0.75, &[(B, " \u{200b} \nc", 16.0, None)], (48.0, 42.0)),
+        (1.25, &[(B, "   \nc", 16.0, None)], (80.0, 74.0)),
+        (7.25, &[(B, "   \nc", 16.0, None)], (64.0, 58.0)),
+        (
+            1.25,
+            &[
+                (B, " ", 16.0, Some(1.265625)),
+                (B, "  \nc", 16.0, Some(1.265625)),
+            ],
+            (80.0, 74.0),
+        ),
+        (
+            1.25,
+            &[
+                (B, " ", 16.0, Some(1.28125)),
+                (B, "  \nc", 16.0, Some(1.28125)),
+            ],
+            (64.0, 58.0),
+        ),
         (
             1.0,
             &[(B, " ", 16.0, None), (B, " \nc", 16.0, None)],
@@ -2050,6 +2071,179 @@ fn whitespace_before_a_forced_break_in_the_next_span_does_not_hang() {
         let what = format!("{parts:?} at width {width}");
         assert_eq!(h, height, "{what}: height");
         assert_at(&what, mono_at(&placed, "c"), (0.0, baseline));
+    }
+}
+
+#[test]
+fn padding_tabs_and_collapsed_spans_break_like_chromium() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
+    let text = |white_space, t: &str, size, line_height, padding_x: Option<f32>| Inline::Text {
+        text: t.to_string(),
+        style: TextStyle {
+            family: FamilyList::parse(MONO),
+            size,
+            line_height,
+            tab_size: 1,
+            background: padding_x.map(|padding_x| sosie_core::InlineBackground {
+                padding_x,
+                padding_y: 0.0,
+                radius: 0.0,
+                color: hex("#000000"),
+            }),
+            ..style(MONO, white_space)
+        },
+    };
+    let inline_box = |width, height| Inline::Box(InlineBox { width, height });
+    let (any, ltr) = (OverflowWrap::Anywhere, Direction::Ltr);
+    let rows = [
+        (
+            ((N, 16.0), any, ltr),
+            5.984375,
+            vec![
+                text(N, " ", 10.0, 16.0, Some(6.5)),
+                text(B, "\na", 10.0, 16.0, Some(6.53125)),
+                text(P, "c", 10.0, 16.0, None),
+            ],
+            48.0,
+            ("c", (0.0, 42.0)),
+        ),
+        (
+            ((N, 16.0), any, ltr),
+            19.0,
+            vec![
+                inline_box(0.0, 6.0),
+                text(B, " \r \n", 10.0, 80.0, None),
+                text(N, "  \n", 10.0, 16.0, Some(0.5)),
+                text(B, "\ta", 10.0, 80.0, None),
+                text(B, "c", 10.0, 16.0, None),
+            ],
+            160.0,
+            ("c", (12.03125, 122.0)),
+        ),
+        (
+            ((N, 16.0), any, ltr),
+            7.0,
+            vec![
+                text(N, "a", 10.0, 16.0, None),
+                text(B, "\t", 0.0, 16.0, None),
+                text(W, "\n", 10.0, 80.0, None),
+                text(N, "c", 10.0, 16.0, None),
+            ],
+            112.0,
+            ("c", (0.0, 106.0)),
+        ),
+        (
+            ((N, 80.0), OverflowWrap::Normal, Direction::Rtl),
+            12.0,
+            vec![
+                inline_box(6.0, 6.0),
+                text(N, "\na \na", 10.0, 16.0, None),
+                text(W, "\r\n", 10.0, 16.0, Some(6.53125)),
+                text(P, "\ta ", 10.0, 16.0, Some(3.0)),
+                inline_box(6.0, 6.0),
+                text(P, "\nc", 10.0, 16.0, None),
+            ],
+            400.0,
+            ("c", (5.984375, 362.0)),
+        ),
+        (
+            ((P, 16.0), any, ltr),
+            6.015625,
+            vec![
+                text(P, "  a", 10.0, 16.0, None),
+                text(B, "\u{200b}\u{200b}\n", 10.0, 16.0, None),
+                text(B, "a\u{200b}", 10.0, 80.0, None),
+                inline_box(0.0, 6.0),
+            ],
+            96.0,
+            ("a", (0.0, 58.0)),
+        ),
+    ];
+    for (((strut_ws, strut), overflow_wrap, direction), width, inlines, height, c) in rows {
+        let p = Paragraph {
+            width,
+            strut: TextStyle {
+                family: FamilyList::parse(MONO),
+                size: 10.0,
+                line_height: strut,
+                tab_size: 1,
+                ..style(MONO, strut_ws)
+            },
+            overflow_wrap,
+            direction,
+        };
+        let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+        let what = format!("{} inlines {direction:?} at width {width}", inlines.len());
+        assert_eq!(t.height, height, "{what}: height");
+        let mut list = DisplayList::new(100.0, 400.0, hex("#ffffff"));
+        t.paint(&mut list, 0.0, 0.0);
+        let (ch, at) = c;
+        let (_, ids) = mono_run(P, OverflowWrap::Normal, ltr, 10.0, &[(P, ch)], 100.0);
+        let last = list
+            .items
+            .iter()
+            .flat_map(|i| match i {
+                Item::Glyphs {
+                    x,
+                    baseline,
+                    glyphs,
+                    ..
+                } => glyphs
+                    .iter()
+                    .filter(|g| g.id == ids[0].0)
+                    .map(|g| (x + g.x, baseline + g.y))
+                    .collect(),
+                _ => Vec::new(),
+            })
+            .max_by(|p, q| p.1.total_cmp(&q.1))
+            .unwrap_or((f32::NAN, f32::NAN));
+        assert_at(&format!("{what}: last {ch}"), last, at);
+    }
+}
+
+#[test]
+fn an_inline_box_before_a_break_spaces_space_keeps_its_line() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
+    let mono = |white_space, line_height| TextStyle {
+        family: FamilyList::parse(MONO),
+        size: 10.0,
+        line_height,
+        tab_size: 1,
+        ..style(MONO, white_space)
+    };
+    let text = |white_space, t: &str, line_height| Inline::Text {
+        text: t.to_string(),
+        style: mono(white_space, line_height),
+    };
+    for head in [
+        text(N, "a", 16.0),
+        text(P, "ab", 16.0),
+        text(B, "a\t", 16.0),
+    ] {
+        let inlines = vec![
+            head,
+            Inline::Box(InlineBox {
+                width: 6.0,
+                height: 20.0,
+            }),
+            text(B, " ", 16.0),
+            text(W, "\n", 80.0),
+            text(N, "c", 16.0),
+        ];
+        let p = Paragraph {
+            width: 1.0,
+            strut: mono(W, 16.0),
+            overflow_wrap: OverflowWrap::Normal,
+            direction: Direction::Ltr,
+        };
+        let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+        let what = format!("{:?}", inlines[0]);
+        assert_eq!(t.height, 154.0, "{what}: height");
+        let placed = t
+            .lines
+            .iter()
+            .find_map(|l| l.boxes.first().map(|b| (b.x, b.y)));
+        assert_eq!(placed, Some((0.0, 16.0)), "{what}: box");
     }
 }
 

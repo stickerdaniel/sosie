@@ -7,6 +7,8 @@ use crate::{linebreak, script, shape};
 use std::ops::Range;
 use unicode_bidi::{BidiClass, BidiInfo, Level};
 
+mod breaker;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum WhiteSpace {
     Normal,
@@ -263,14 +265,19 @@ struct Para<'a> {
     adv: Vec<f32>,
     item_break: Vec<bool>,
     shape_break: Vec<bool>,
-    hang_from: Vec<usize>,
-    span_end: Vec<usize>,
     wrap: bool,
-    break_before_spaces: bool,
+    strut_ws: WhiteSpace,
     anywhere: bool,
     avail: f32,
     rtl_base: bool,
     strut: (f32, f32),
+    tab_space: f32,
+}
+
+fn space_width(fonts: &Fonts, face: FaceId, size: f32) -> f32 {
+    let mut gl = Vec::new();
+    shape::shape(fonts.expect(face), " ", size, false, None, &mut gl);
+    gl.iter().map(|g| g.adv).sum()
 }
 
 fn half_leading(fonts: &Fonts, face: FaceId, size: f32, line_height: f32) -> (f32, f32) {
@@ -422,14 +429,6 @@ impl<'a> Para<'a> {
                 || q.pad_before > 0.0
                 || styles[p.span].size != styles[q.span].size;
         }
-        let mut hang_from = vec![0; n + 1];
-        for k in 1..=n {
-            hang_from[k] = if g[k - 1].hang { hang_from[k - 1] } else { k };
-        }
-        let mut span_end = vec![0; styles.len()];
-        for (k, gk) in g.iter().enumerate() {
-            span_end[gk.span] = k + 1;
-        }
         let strut_style = resolve(fonts, &para.strut);
         let strut = half_leading(
             fonts,
@@ -445,17 +444,13 @@ impl<'a> Para<'a> {
             adv: Vec::new(),
             item_break,
             shape_break,
-            hang_from,
-            span_end,
             wrap: para.strut.white_space != WhiteSpace::Pre,
-            break_before_spaces: matches!(
-                para.strut.white_space,
-                WhiteSpace::Normal | WhiteSpace::Pre
-            ),
+            strut_ws: para.strut.white_space,
             anywhere: para.overflow_wrap == OverflowWrap::Anywhere,
             avail: para.width,
             rtl_base,
             strut,
+            tab_space: space_width(fonts, strut_style.primary, para.strut.size),
         };
         p.adv = p.shape_range(0, n).0;
         p
@@ -628,22 +623,8 @@ impl<'a> Para<'a> {
         trim
     }
 
-    fn space_width(&self, span: usize) -> f32 {
-        let st = &self.styles[span];
-        let mut gl = Vec::new();
-        shape::shape(
-            self.fonts.expect(st.primary),
-            " ",
-            st.size,
-            false,
-            None,
-            &mut gl,
-        );
-        gl.iter().map(|g| g.adv).sum()
-    }
-
     fn tab_advance(&self, span: usize, x: f32) -> f32 {
-        let sw = self.space_width(span);
+        let sw = self.tab_space;
         let tw = sw * self.styles[span].tab as f32;
         if !(tw > 0.0 && tw.is_finite() && x.is_finite()) {
             return 0.0;
@@ -693,29 +674,11 @@ impl<'a> Para<'a> {
         (pen.width(), pos)
     }
 
-    fn prefix_fits(&self, pen: &mut Pen, le: usize) -> bool {
-        let ls = pen.ls;
-        let t = self.trail(ls, le);
-        let trim = if t > ls { self.end_trim(t) } else { 0.0 };
-        while pen.k < t {
-            self.step(pen, &self.adv[ls..]);
-            if pen.width() - trim > self.avail + 1.0 / 64.0 {
-                return false;
-            }
+    fn trail(&self, ls: usize, mut le: usize) -> usize {
+        while le > ls && self.g[le - 1].hang {
+            le -= 1;
         }
-        let w = pen.width();
-        fits(
-            if w > self.avail && t > ls {
-                w - trim
-            } else {
-                w
-            },
-            self.avail,
-        )
-    }
-
-    fn trail(&self, ls: usize, le: usize) -> usize {
-        self.hang_from[le].max(ls)
+        le
     }
 
     fn end_trim(&self, t: usize) -> f32 {
@@ -728,17 +691,6 @@ impl<'a> Para<'a> {
                 self.styles[g.span].size / 2.0
             }
             _ => 0.0,
-        }
-    }
-
-    fn fit_width(&self, ls: usize, le: usize) -> f32 {
-        let t = self.trail(ls, le);
-        let adv = self.shape_range(ls, t).0;
-        let w = self.walk(ls, t, &adv).0;
-        if w > self.avail && t > ls {
-            w - self.end_trim(t)
-        } else {
-            w
         }
     }
 
@@ -798,200 +750,10 @@ impl<'a> Para<'a> {
     }
 
     fn breaks(&self) -> Vec<(usize, usize)> {
-        let n = self.g.len();
-        let mut out = Vec::new();
-        if n == 0 {
-            return out;
+        if self.g.is_empty() {
+            return Vec::new();
         }
-        let mut hs = 0;
-        for k in 0..n {
-            if self.g[k].nl {
-                self.break_hard(hs, k, &mut out);
-                hs = k + 1;
-            }
-        }
-        if hs < n {
-            self.break_hard(hs, n, &mut out);
-        }
-        out
-    }
-
-    fn break_hard(&self, hs: usize, he: usize, out: &mut Vec<(usize, usize)>) {
-        if hs >= he {
-            out.push((hs, hs));
-            return;
-        }
-        let a = self.g[hs].start;
-        let b = self.g[he - 1].end;
-        let mut opps: Vec<usize> = linebreak::line_breaks(&self.text[a..b])
-            .into_iter()
-            .filter_map(|o| {
-                self.g[hs..he]
-                    .binary_search_by_key(&(a + o), |g| g.start)
-                    .ok()
-                    .map(|i| hs + i)
-                    .filter(|&k| k == hs || !self.g[k - 1].cr)
-            })
-            .collect();
-        for k in hs + 1..he {
-            let (p, q) = (&self.g[k - 1], &self.g[k]);
-            let (pw, qw) = (self.styles[p.span].ws, self.styles[q.span].ws);
-            let blank = |g: &G| g.space || g.tab;
-            let after_space = match pw {
-                WhiteSpace::BreakSpaces => blank(p),
-                WhiteSpace::PreWrap => (p.space && !q.space) || (blank(p) && blank(q) && qw != pw),
-                WhiteSpace::Normal => p.space && blank(q) && qw != pw,
-                _ => false,
-            };
-            let before_pre_space = self.break_before_spaces
-                && matches!(qw, WhiteSpace::Pre | WhiteSpace::BreakSpaces)
-                && pw != WhiteSpace::Pre
-                && blank(q)
-                && !blank(p)
-                && p.span != q.span;
-            if after_space || before_pre_space {
-                opps.push(k);
-            }
-        }
-        let wraps = |k: usize| {
-            let (p, q) = (&self.g[k - 1], &self.g[k]);
-            self.styles[p.span].ws != WhiteSpace::Pre
-                || (self.wrap && p.span != q.span && !p.space && !p.tab)
-        };
-        opps.retain(|&k| wraps(k));
-        opps.sort_unstable();
-        opps.dedup();
-        let mut ls = hs;
-        let mut ink = hs;
-        while ls < he {
-            let first = opps.partition_point(|&o| o <= ls);
-            let cand = |k: usize| opps.get(first + k).copied().unwrap_or(he);
-            let count = opps.len() - first + 1;
-            let mut best = None;
-            let mut pen = Pen::new(ls);
-            for k in 0..count {
-                if self.prefix_fits(&mut pen, cand(k)) {
-                    best = Some(k);
-                } else {
-                    break;
-                }
-            }
-            let mut chosen = None;
-            let mut memo = None;
-            if let Some(mut k) = best {
-                loop {
-                    let le = cand(k);
-                    if fits(self.remeasure(ls, le, &mut memo), self.avail) {
-                        chosen = Some(le);
-                        break;
-                    }
-                    if k == 0 {
-                        break;
-                    }
-                    k -= 1;
-                }
-            }
-            let mut le = match chosen {
-                Some(le) => le,
-                None if !self.anywhere => cand(0),
-                None => {
-                    let mut pen = Pen::new(ls);
-                    self.step(&mut pen, &self.adv[ls..]);
-                    let mut g = ls + 1;
-                    while g < he && fits(self.step(&mut pen, &self.adv[ls..]).1, self.avail) {
-                        g += 1;
-                    }
-                    loop {
-                        let allowed = g == he || wraps(g);
-                        if allowed
-                            && (g <= ls + 1 || fits(self.remeasure(ls, g, &mut memo), self.avail))
-                        {
-                            break g;
-                        }
-                        if g <= ls + 1 {
-                            break (ls + 1..he).find(|&k| wraps(k)).unwrap_or(he);
-                        }
-                        g -= 1;
-                    }
-                }
-            };
-            let pre_overflow = chosen.is_none()
-                && self.anywhere
-                && self.styles[self.g[le - 1].span].ws == WhiteSpace::Pre
-                && !fits(self.fit_width(ls, le), self.avail);
-            let after_tab = self.g[le - 1].tab;
-            let spilled = self.g[le - 1].space
-                && self.styles[self.g[le - 1].span].ws == WhiteSpace::BreakSpaces
-                && !fits(self.fit_width(ls, le), self.avail)
-                && fits(self.head_width(ls, le), self.avail);
-            let line_end = le;
-            let mut head_fits = None;
-            let mut split = false;
-            while le < he && self.g[le].hang {
-                let span = self.g[le].span;
-                let end = self.span_end[span].min(he);
-                let run = (le..end).take_while(|&k| self.g[k].hang).count();
-                let collapsible = self.styles[span].ws == WhiteSpace::Normal;
-                let stop = le + run;
-                ink = ink.max(stop);
-                while ink < he && self.g[ink].hang {
-                    ink += 1;
-                }
-                let held = stop < end || (ink == he && he < self.g.len());
-                let merged = stop == he && self.g.get(he).is_some_and(|g| g.span == span);
-                split |= pre_overflow && !collapsible && held && stop == end;
-                if !collapsible
-                    && held
-                    && (pre_overflow && (stop < end || merged)
-                        || spilled && merged
-                        || after_tab
-                            && (self.g[line_end - 1].hang
-                                || *head_fits.get_or_insert_with(|| {
-                                    fits(self.head_width(ls, line_end), self.avail)
-                                })))
-                {
-                    break;
-                }
-                le += run;
-            }
-            out.push((ls, le));
-            let t = self.trail(ls, le);
-            let last = &self.g[t.max(ls + 1) - 1];
-            if le == he
-                && (split
-                    || he < self.g.len()
-                        && t > ls
-                        && (last.space || last.tab)
-                        && self.styles[last.span].ws == WhiteSpace::BreakSpaces
-                        && (last.span != self.g[he].span
-                            || (ls == hs
-                                || self.g[ls - 1].span == last.span
-                                    && self.blank_from(ls - 1, ls) < ls)
-                                && last.space
-                                && self.fit_width(ls, self.blank_from(ls, t)) == 0.0)
-                        && !fits(self.fit_width(ls, le), self.avail)
-                        && fits(self.head_width(ls, t), self.avail))
-            {
-                out.push((he, he));
-            }
-            ls = le;
-        }
-    }
-
-    fn head_width(&self, ls: usize, t: usize) -> f32 {
-        let b = self.blank_from(ls, t);
-        self.fit_width(ls, b) + self.g[b..t].iter().map(|g| g.pad_before).sum::<f32>()
-    }
-
-    fn blank_from(&self, ls: usize, t: usize) -> usize {
-        let mut k = t;
-        while k > ls && {
-            let g = &self.g[k - 1];
-            (g.space || g.tab) && self.styles[g.span].ws == WhiteSpace::BreakSpaces
-        } {
-            k -= 1;
-        }
-        k
+        breaker::Breaker::new(self).run()
     }
 
     fn line(&self, ls: usize, le: usize, lf: bool, top: f32) -> Line {

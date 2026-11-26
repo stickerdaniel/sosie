@@ -408,6 +408,7 @@ impl Typesetter<'_> {
             strut: style.clone(),
             overflow_wrap: OverflowWrap::Normal,
             direction: Direction::Ltr,
+            dpr: CHECKED_DPR,
         };
         let inlines = [Inline::Text {
             text: text.to_string(),

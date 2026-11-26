@@ -178,6 +178,7 @@ fn measure(text: &str, size: f32, weight: u16, white_space: WhiteSpace, width: f
         strut: style.clone(),
         overflow_wrap: OverflowWrap::Normal,
         direction: Direction::Ltr,
+        dpr: 2.0,
     };
     let inlines = [Inline::Text {
         text: text.to_string(),

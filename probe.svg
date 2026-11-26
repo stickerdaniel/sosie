@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="814" height="120" viewBox="0 0 814 120">
+<style>
+.bg{fill:#ffffff}.fg{fill:#1f2328}.muted{fill:#59636e}
+@media (prefers-color-scheme: dark){.bg{fill:#0d1117}.fg{fill:#f0f6fc}.muted{fill:#9198a1}}
+text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+</style>
+<rect class="bg" width="814" height="120" rx="6"/>
+<text class="fg" x="16" y="30" font-size="14" font-weight="600">SVG probe: 14 px semibold, system font stack</text>
+<text class="muted" x="16" y="60" font-size="12">12 px muted text, dark mode via prefers-color-scheme</text>
+<text class="fg" x="16" y="95" font-size="14" style="font-family:'Mona Sans VF','Mona Sans'">Mona Sans requested (web font of GitHub)</text>
+</svg>

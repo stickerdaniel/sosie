@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "goldens": {
+    "synthetic-text": {
+      "class": "synthetic",
+      "viewport": {
+        "width": 1000,
+        "height": 800
+      },
+      "crop": "none: line geometry only",
+      "inputs": {
+        "tests/golden/synthetic/text/corpus-1.json": "18f582551cc1ced63236e89a819eb2b7870016fe2ee669641df425214d8eaabb",
+        "tests/golden/synthetic/text/corpus-2.json": "54caa4a6b5835e27ee051fe4c1d79a4d0b4f953d577ed1ebe8a4c5227cbba4ac"
+      },
+      "geometry": {
+        "tests/golden/synthetic/text/chrome-1.json": "f279a336e59485459f5ac10769ac36386a32235e1977f8bd2ff08f97423f5307",
+        "tests/golden/synthetic/text/chrome-2.json": "89777b51c72f34ea643590c88f62d60c0d1cb841953ad083e069ddd40d9ed09f"
+      },
+      "harness": {
+        "tools/oracle/text-parity.mjs": "f250864af4f6b3aa3bb1c6d252af8fff02db6e36fa2ab0ac73331efa05b96028",
+        "tools/oracle/lib.mjs": "7abadd129aa3efbb8c814ed7c174c7cc012966089d6ce449471cb0ef6b59c386",
+        "tools/oracle/themes.mjs": "ba57d89a05021ef174ec627f41ac8292a88fad48fe3621c0a91f4d3bb3b7f14b",
+        "tools/oracle/capture.sh": "c7157e6b3797bc0737f590dcb96483d2e0801a892413bcad56a7649d3f4207c6",
+        "tools/oracle/ref/Dockerfile": "98565bced1ba6a37ff803b0d92d33baae7d3b8ff5d635a14cab1491f4d4e0535",
+        "tools/oracle/ref/fonts.conf": "8e6e356c22859e20571a76eaa94fe1646982e3105a982cb625011425124dc8c1",
+        "tools/oracle/corpus.mjs": "dbc367a472a28180e6f28ddb791984978a5d6c6b252386356e1f44ec9b5ae3ff"
+      },
+      "capture": {
+        "image": "sha256:5efae82b8506de988fbb5ce15766350e339cf9da75ee8957cc8f10148e988f9b",
+        "browser": "141.0.7390.37",
+        "launchArgs": [
+          "--font-render-hinting=none",
+          "--disable-lcd-text"
+        ],
+        "clock": "2026-11-26T00:00:00.000Z",
+        "locale": "en-US",
+        "timezone": "UTC",
+        "dpr": 2,
+        "fonts": {
+          "assets/fonts.lock.json": "27e7ba6e3afe92b27d251c9cbad15f7265feea8f8d3573eecf2f8f6a7b42e024"
+        },
+        "masks": [],
+        "date": "2026-11-24"
+      },
+      "bundle": null
+    },
+    "synthetic-paint": {
+      "class": "synthetic",
+      "viewport": {
+        "width": 800,
+        "height": 800
+      },
+      "crop": "border box of each case, rounded up to whole CSS px",
+      "inputs": {
+        "tests/golden/synthetic/paint/cases-1.json": "2a34729d58d57ff9add889e990df566dcafd5a177a73a4e168f60b322dd3ba8f",
+        "tests/golden/synthetic/paint/cases-2.json": "ca4eed652b0b7c33f815ab993eeacc595624c91441f06d37bb21d7943322e0d6"
+      },
+      "geometry": {
+        "tests/golden/synthetic/paint/boxes-1.json": "6e74cbb79b410e1def03ccc2e8b3c779d1ae7bbd35970e44bc13cc2d3b4ba44c",
+        "tests/golden/synthetic/paint/boxes-2.json": "e4beb16519294e9a1f181365800aaabd5051ee593d38bd2c511a89437163a51c"
+      },
+      "harness": {
+        "tools/oracle/text-parity.mjs": "f250864af4f6b3aa3bb1c6d252af8fff02db6e36fa2ab0ac73331efa05b96028",
+        "tools/oracle/lib.mjs": "7abadd129aa3efbb8c814ed7c174c7cc012966089d6ce449471cb0ef6b59c386",
+        "tools/oracle/themes.mjs": "ba57d89a05021ef174ec627f41ac8292a88fad48fe3621c0a91f4d3bb3b7f14b",
+        "tools/oracle/capture.sh": "c7157e6b3797bc0737f590dcb96483d2e0801a892413bcad56a7649d3f4207c6",
+        "tools/oracle/ref/Dockerfile": "98565bced1ba6a37ff803b0d92d33baae7d3b8ff5d635a14cab1491f4d4e0535",
+        "tools/oracle/ref/fonts.conf": "8e6e356c22859e20571a76eaa94fe1646982e3105a982cb625011425124dc8c1",
+        "tools/oracle/paint-cases.mjs": "fbb9573ea8b7b372b2ec5dd30fe616a52f41e348e1d9ef222caa1b5e10cb13eb"
+      },
+      "capture": {
+        "image": "sha256:5efae82b8506de988fbb5ce15766350e339cf9da75ee8957cc8f10148e988f9b",
+        "browser": "141.0.7390.37",
+        "launchArgs": [
+          "--font-render-hinting=none",
+          "--disable-lcd-text"
+        ],
+        "clock": "2026-11-26T00:00:00.000Z",
+        "locale": "en-US",
+        "timezone": "UTC",
+        "dpr": 2,
+        "fonts": {
+          "assets/fonts.lock.json": "27e7ba6e3afe92b27d251c9cbad15f7265feea8f8d3573eecf2f8f6a7b42e024"
+        },
+        "masks": [],
+        "date": "2026-11-24"
+      },
+      "bundle": {
+        "tag": "goldens-2",
+        "asset": "synthetic-paint-2.tar.gz",
+        "sha256": "6e5796ebd4decd513a71eece9809e5bc85122e1793232a83590ffe0ede6fa5bf",
+        "bytes": 15265144
+      }
+    }
+  }
+}

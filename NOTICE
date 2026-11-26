@@ -6,4 +6,150 @@ This product is licensed under the Apache License, Version 2.0 (LICENSE).
 Files copied or adapted from xeet (Apache-2.0) are listed below with their
 source commit and a change note, as Apache-2.0 section 4 requires.
 
-(none yet)
+Source: xeet, https://github.com/rauchg/xeet, commit 095ba15,
+crates/xeet-core/src. Copyright the xeet authors, Apache License 2.0.
+
+Every file below has its source comments removed. The other changes per file:
+
+Copied, code unchanged
+  blink_ascii.rs        from blink_ascii.rs
+  script.rs             from script.rs
+
+Adapted
+  linebreak.rs          from linebreak.rs, line break strictness set to
+                        Normal (CSS line-break: auto), the ASCII pair
+                        lookup and the rule for '-' before a digit in one
+                        function
+  color.rs              from color.rs, Rgba::rgba constructor removed,
+                        parse_hex builds the struct directly
+  paint/coverage.rs     from paint/coverage.rs, mask_transformed removed,
+                        mask and SUBSAMPLES limited to tests
+  paint/encode.rs       from paint/encode.rs, encode_png_best removed
+  shape.rs              from shape.rs, plan key reduced to face, direction
+                        and script, chws feature on the CJK face, advances
+                        from the 26.6 size or the bitmap strike
+  text.rs               from the xeet inline layout model, rewritten for CSS
+                        spans, white-space, overflow-wrap, inline boxes,
+                        per-cluster font fallback and bidi line order
+  paint/mod.rs          from paint/mod.rs, display list items reduced to
+                        fills, borders, glyph runs and text backgrounds,
+                        device size checked against Limits before allocation
+  paint/glyph.rs        from paint/glyph.rs, outline y snapped to 1/4 px,
+                        quadratics chopped at y extrema and flattened with
+                        Skia subdivision counts, embedded Skia mask gamma
+                        tables
+  paint/shapes.rs       from paint/shapes.rs, squircles removed
+
+Skia
+
+paint/glyph.rs follows Skia's quadratic subdivision (cheap_distance and
+diff_to_shift in src/core/SkEdge.cpp). The code was ported from the Rust
+port of those two functions in tiny-skia 0.11.4, src/edge.rs (crates.io),
+and keeps their integer arithmetic with accuracy shift 2.
+
+The 8 mask gamma tables in paint/glyph.rs follow Skia's preblend gamma,
+apply_contrast and the correcting LUT of src/core/SkMaskGamma.cpp. They
+were generated in f32 with contrast 0.2, power gamma 1.2 and source
+luminance (i << 5) | (i << 2) | (i >> 1) for i in 0 to 7. The formula was
+written from SkMaskGamma.cpp; no Skia revision was recorded at the time.
+The unit test in paint/glyph.rs regenerates all 8 tables from it.
+
+Skia, https://skia.org, and tiny-skia 0.11.4 are distributed under this
+license. The copyright lines are those of tiny-skia's LICENSE:
+
+  Copyright (c) 2011 Google Inc. All rights reserved.
+  Copyright (c) 2020 Yevhenii Reizner All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions are
+  met:
+
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in
+      the documentation and/or other materials provided with the
+      distribution.
+
+    * Neither the name of the copyright holder nor the names of its
+      contributors may be used to endorse or promote products derived
+      from this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+  OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+  LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Chromium
+
+These files are translated or adapted from Chromium 141.0.7390.37,
+https://chromium.googlesource.com/chromium/src, tag commit
+9f043f63b0e5b728c8d09f3e3ddfc1681a4bd58e:
+
+  text/breaker.rs   translated from
+                    third_party/blink/renderer/core/layout/inline/
+                    line_breaker.cc, Copyright 2016 The Chromium Authors,
+                    and third_party/blink/renderer/platform/fonts/shaping/
+                    shaping_line_breaker.cc, Copyright 2017 The Chromium
+                    Authors
+  text.rs           white-space collapse adapted from
+                    third_party/blink/renderer/core/layout/inline/
+                    inline_items_builder.cc, Copyright 2016 The Chromium
+                    Authors
+  blink_ascii.rs    the ASCII pair table of LineBreakData::FillAscii in
+                    third_party/blink/renderer/platform/text/
+                    character_property_data_generator.cc, Copyright 2016
+                    The Chromium Authors, by way of xeet
+
+They are distributed under Chromium's license. This is its text from the
+LICENSE file at the root of the Chromium source at that tag:
+
+  Copyright 2015 The Chromium Authors
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions are
+  met:
+
+     * Redistributions of source code must retain the above copyright
+  notice, this list of conditions and the following disclaimer.
+     * Redistributions in binary form must reproduce the above
+  copyright notice, this list of conditions and the following disclaimer
+  in the documentation and/or other materials provided with the
+  distribution.
+     * Neither the name of Google LLC nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+  OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+  LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Fonts
+
+assets/fonts holds font files taken from Ubuntu 24.04 packages (versions
+in assets/fonts.lock.json). They are licensed under the SIL Open Font
+License 1.1, not Apache-2.0:
+
+  Noto Sans, Noto Sans Arabic, Noto Sans Hebrew   fonts-noto-core
+  Noto Sans CJK                                    fonts-noto-cjk
+  Noto Color Emoji                                 fonts-noto-color-emoji
+  Liberation Mono                                  fonts-liberation
+
+The package copyright files with the full license texts are in
+assets/fonts/licenses.

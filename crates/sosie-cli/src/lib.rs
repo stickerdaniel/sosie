@@ -24,8 +24,9 @@ metrics.json: { "title"?: string, "metrics": [{ "name": string, "unit": string, 
   --width   CSS px from 646 to 4096, default 978
   --format  webp (lossless, default) or png
 
-A name wider than the 250 px name column wraps and makes its row taller.
-Each such name prints a warning to stderr; the files are still written.
+A name wider than the 250 px name column wraps at its spaces and makes its
+row taller. Each such name prints a warning to stderr; the files are still
+written. A single word wider than 250 px is a metrics.json error.
 
 These receivers need --format png: Slack image blocks, Outlook for Windows,
 LinkedIn and Facebook og:image, Gmail (converts WebP to JPG), desk albums
@@ -190,12 +191,13 @@ fn chart_command(args: &ChartArgs, stdout: &mut impl Write) -> Result<(), Error>
             |from: &Path, to: &Path| std::fs::rename(from, to),
         )
         .map_err(Error::Output)?;
+    let mut stderr = io::stderr().lock();
     for backup in stale {
-        eprintln!("sosie: warning: {backup}");
+        let _ = writeln!(stderr, "sosie: warning: {backup}");
     }
     for WrappedName { index, lines } in wrapped {
         let name = &chart.metrics()[index].name;
-        eprintln!("sosie: warning: metrics[{index}] name wraps onto {lines} lines in the {NAME_WIDTH} px name column: {name:?}; a shorter name keeps the row on one line");
+        let _ = writeln!(stderr, "sosie: warning: metrics[{index}] name wraps onto {lines} lines in the {NAME_WIDTH} px name column: {name:?}; a shorter name keeps the row on one line");
     }
     for path in paths {
         writeln!(stdout, "{}", path.display()).map_err(Error::Stdout)?;

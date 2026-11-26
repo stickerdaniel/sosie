@@ -271,7 +271,7 @@ impl Renderer<'_> {
         let (x0, y0) = (shape.rect.x * d, shape.rect.y * d);
         self.clipped_fill(&p, &c, FillRule::Winding, color, |x, y| {
             let along = (x + 0.5 - x0 + (y + 0.5 - y0)) / d * std::f32::consts::FRAC_1_SQRT_2;
-            along.rem_euclid(period) < stripe
+            along - (along / period).floor() * period < stripe
         });
     }
 

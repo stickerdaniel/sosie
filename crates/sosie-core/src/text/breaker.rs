@@ -243,6 +243,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
             self.over = false;
             self.forced = false;
             self.line_style = self.style;
+            self.bao = false;
             self.set_style(self.style);
             self.break_line();
             if !self.forced {
@@ -374,13 +375,16 @@ impl<'b, 'a> Breaker<'b, 'a> {
         if k <= self.ls {
             return false;
         }
-        if k < g.len() && g[k].nl && g[k - 1].cr {
-            return false;
-        }
-        if k >= g.len() || self.char_break {
+        if k >= g.len() {
             return true;
         }
         let cr_first = g[k].nl && self.p.text[g[k].start..g[k].end].starts_with('\r');
+        if g[k].nl && !cr_first && g[k - 1].cr {
+            return false;
+        }
+        if self.char_break {
+            return true;
+        }
         match (sp(&g[k - 1]), sp(&g[k]) && !cr_first) {
             (true, space) => self.every || !space,
             (false, true) => false,

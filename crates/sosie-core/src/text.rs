@@ -572,6 +572,25 @@ impl<'a> Para<'a> {
                 || q.gap_before > 0.0
                 || styles[p.span].size != styles[q.span].size;
         }
+        let mut k = 0;
+        while k < n {
+            let span = g[k].span;
+            let leads = matches!(
+                styles[span].ws,
+                WhiteSpace::PreWrap | WhiteSpace::BreakSpaces
+            ) && g[k].space
+                && (k == 0 || g[k - 1].nl);
+            if !leads {
+                k += 1;
+                continue;
+            }
+            k = (k..n)
+                .find(|&e| !g[e].space || g[e].span != span)
+                .unwrap_or(n);
+            if let Some(b) = item_break.get_mut(k) {
+                *b = true;
+            }
+        }
         let strut_style = resolve(fonts, &para.strut);
         let strut = half_leading(
             fonts,

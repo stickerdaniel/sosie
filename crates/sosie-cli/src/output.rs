@@ -42,6 +42,23 @@ impl fmt::Display for OutputError {
 
 impl std::error::Error for OutputError {}
 
+#[derive(Debug)]
+pub struct StaleBackup {
+    pub path: PathBuf,
+    pub error: io::Error,
+}
+
+impl fmt::Display for StaleBackup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}: {}; the new files are in place, this backup of an old file stays",
+            self.path.display(),
+            self.error
+        )
+    }
+}
+
 pub struct Targets<const N: usize> {
     paths: [PathBuf; N],
     existing: [bool; N],
@@ -74,7 +91,7 @@ impl<const N: usize> Targets<N> {
         &self,
         contents: [&[u8]; N],
         rename: impl FnMut(&Path, &Path) -> io::Result<()>,
-    ) -> Result<(), OutputError> {
+    ) -> Result<Vec<StaleBackup>, OutputError> {
         let mut commit = Commit {
             targets: self,
             rename,
@@ -83,24 +100,38 @@ impl<const N: usize> Targets<N> {
             placed: 0,
         };
         match commit.run(contents) {
-            Ok(()) => commit.finish(),
+            Ok(()) => Ok(commit.finish()),
             Err((path, source)) => Err(commit.roll_back(path, source)),
         }
     }
 }
 
-fn sibling(path: &Path, tag: &str) -> PathBuf {
-    let mut name = OsString::from(".");
-    name.push(path.file_name().unwrap_or_default());
-    name.push(format!(".sosie-{}.{tag}", std::process::id()));
-    path.with_file_name(name)
+fn reserve(path: &Path, tag: &str) -> io::Result<(PathBuf, File)> {
+    let mut n = 0u64;
+    loop {
+        let mut name = OsString::from(".");
+        name.push(path.file_name().unwrap_or_default());
+        name.push(format!(".sosie-{}-{n}.{tag}", std::process::id()));
+        let candidate = path.with_file_name(name);
+        match File::create_new(&candidate) {
+            Ok(file) => return Ok((candidate, file)),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => n += 1,
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+struct Backup<'a> {
+    original: &'a Path,
+    path: PathBuf,
+    moved: bool,
 }
 
 struct Commit<'a, const N: usize, R> {
     targets: &'a Targets<N>,
     rename: R,
     temps: Vec<PathBuf>,
-    backups: Vec<(&'a Path, PathBuf)>,
+    backups: Vec<Backup<'a>>,
     placed: usize,
 }
 
@@ -108,15 +139,20 @@ impl<'a, const N: usize, R: FnMut(&Path, &Path) -> io::Result<()>> Commit<'a, N,
     fn run(&mut self, contents: [&[u8]; N]) -> Result<(), (&'a Path, io::Error)> {
         let targets = self.targets;
         for (path, bytes) in targets.paths.iter().zip(contents) {
-            let temp = sibling(path, "tmp");
-            let mut file = File::create_new(&temp).map_err(|e| (path.as_path(), e))?;
+            let (temp, mut file) = reserve(path, "tmp").map_err(|e| (path.as_path(), e))?;
             self.temps.push(temp);
             file.write_all(bytes).map_err(|e| (path.as_path(), e))?;
         }
         for (path, _) in targets.paths.iter().zip(targets.existing).filter(|t| t.1) {
-            let backup = sibling(path, "bak");
-            (self.rename)(path, &backup).map_err(|e| (path.as_path(), e))?;
-            self.backups.push((path, backup));
+            let (backup, _) = reserve(path, "bak").map_err(|e| (path.as_path(), e))?;
+            self.backups.push(Backup {
+                original: path,
+                path: backup,
+                moved: false,
+            });
+            let backup = self.backups.last_mut().expect("just pushed");
+            (self.rename)(path, &backup.path).map_err(|e| (path.as_path(), e))?;
+            backup.moved = true;
         }
         for (temp, path) in self.temps.iter().zip(&targets.paths) {
             (self.rename)(temp, path).map_err(|e| (path.as_path(), e))?;
@@ -125,29 +161,38 @@ impl<'a, const N: usize, R: FnMut(&Path, &Path) -> io::Result<()>> Commit<'a, N,
         Ok(())
     }
 
-    fn finish(self) -> Result<(), OutputError> {
-        for (_, backup) in self.backups {
-            fs::remove_file(&backup).map_err(|source| OutputError::Io {
-                path: backup,
-                source,
-            })?;
-        }
-        Ok(())
+    fn finish(self) -> Vec<StaleBackup> {
+        self.backups
+            .into_iter()
+            .filter_map(|backup| {
+                fs::remove_file(&backup.path)
+                    .err()
+                    .map(|error| StaleBackup {
+                        path: backup.path,
+                        error,
+                    })
+            })
+            .collect()
     }
 
     fn roll_back(mut self, path: &Path, source: io::Error) -> OutputError {
         let mut failed = Vec::new();
         let created = self.targets.paths[..self.placed]
             .iter()
-            .filter(|p| !self.backups.iter().any(|(b, _)| b == p));
+            .filter(|p| !self.backups.iter().any(|b| b.original == *p));
         for placed in created {
             if let Err(e) = fs::remove_file(placed) {
                 failed.push((placed.clone(), e));
             }
         }
-        for (original, backup) in &self.backups {
-            if let Err(e) = (self.rename)(backup, original) {
-                failed.push((backup.clone(), e));
+        for backup in &self.backups {
+            let restored = if backup.moved {
+                (self.rename)(&backup.path, backup.original)
+            } else {
+                fs::remove_file(&backup.path)
+            };
+            if let Err(e) = restored {
+                failed.push((backup.path.clone(), e));
             }
         }
         for temp in &self.temps[self.placed..] {

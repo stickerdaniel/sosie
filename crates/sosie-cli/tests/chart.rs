@@ -281,3 +281,67 @@ fn a_failed_restore_is_reported_as_a_rollback_failure() {
     assert_eq!(failed.len(), 1);
     assert_eq!(fs::read_to_string(&light).unwrap(), "old light");
 }
+
+fn rename(from: &Path, to: &Path) -> io::Result<()> {
+    fs::rename(from, to)
+}
+
+#[test]
+fn files_at_the_temp_and_backup_names_survive_a_write() {
+    let dir = scratch("reserved");
+    let [light, dark] = pair(&dir);
+    fs::write(&light, "old light").unwrap();
+    fs::write(&dark, "old dark").unwrap();
+    let pid = std::process::id();
+    let planted = [
+        format!(".a-light.webp.sosie-{pid}-0.bak"),
+        format!(".a-light.webp.sosie-{pid}-0.tmp"),
+    ];
+    for name in &planted {
+        fs::write(dir.join(name), name).unwrap();
+    }
+    let targets = Targets::check(pair(&dir)).unwrap();
+    let stale = targets.write([b"new light", b"new dark"], rename).unwrap();
+    assert!(stale.is_empty(), "{stale:?}");
+    assert_eq!(fs::read_to_string(&light).unwrap(), "new light");
+    assert_eq!(fs::read_to_string(&dark).unwrap(), "new dark");
+    for name in &planted {
+        assert_eq!(&fs::read_to_string(dir.join(name)).unwrap(), name);
+    }
+    let mut expected = set(&["metrics.json", "a-light.webp", "a-dark.webp"]);
+    expected.extend(planted);
+    assert_eq!(names(&dir), expected);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_backup_that_cannot_be_removed_keeps_the_new_files_and_is_reported() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("stale").join("out");
+    fs::create_dir(&dir).unwrap();
+    let [light, dark] = pair(&dir);
+    fs::write(&light, "old light").unwrap();
+    fs::write(&dark, "old dark").unwrap();
+    let targets = Targets::check(pair(&dir)).unwrap();
+    let (last, locked) = (dark.clone(), dir.clone());
+    let result = targets.write(
+        [b"new light", b"new dark"],
+        move |from: &Path, to: &Path| {
+            fs::rename(from, to)?;
+            if to == last {
+                fs::set_permissions(&locked, fs::Permissions::from_mode(0o500))?;
+            }
+            Ok(())
+        },
+    );
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+    let stale = result.unwrap();
+    assert_eq!(fs::read_to_string(&light).unwrap(), "new light");
+    assert_eq!(fs::read_to_string(&dark).unwrap(), "new dark");
+    let mut kept: Vec<String> = stale
+        .iter()
+        .map(|s| fs::read_to_string(&s.path).unwrap())
+        .collect();
+    kept.sort();
+    assert_eq!(kept, ["old dark", "old light"]);
+}

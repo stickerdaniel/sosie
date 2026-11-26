@@ -172,12 +172,15 @@ fn chart_command(args: &ChartArgs, stdout: &mut impl Write) -> Result<(), Error>
         })
     });
     let bytes = [light?, dark?];
-    targets
+    let stale = targets
         .write(
             bytes.each_ref().map(Vec::as_slice),
             |from: &Path, to: &Path| std::fs::rename(from, to),
         )
         .map_err(Error::Output)?;
+    for backup in stale {
+        eprintln!("sosie: warning: {backup}");
+    }
     for path in paths {
         writeln!(stdout, "{}", path.display()).map_err(Error::Stdout)?;
     }

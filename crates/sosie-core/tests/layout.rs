@@ -3469,3 +3469,68 @@ fn an_anywhere_retry_breaks_between_a_cr_and_a_crlf() {
         ),
     ]);
 }
+
+#[test]
+fn an_rtl_tab_run_gives_its_position_advance_to_the_last_tab() {
+    use Direction::{Ltr, Rtl};
+    let mono = |white_space, size, tab_size| TextStyle {
+        family: FamilyList::parse(MONO),
+        size,
+        line_height: 16.0,
+        tab_size,
+        ..style(MONO, white_space)
+    };
+    let run = |direction, width| {
+        let p = Paragraph {
+            width,
+            strut: mono(WhiteSpace::Normal, 10.0, 2),
+            overflow_wrap: OverflowWrap::Anywhere,
+            direction,
+        };
+        let inlines = [
+            Inline::Text {
+                text: "a".into(),
+                style: mono(WhiteSpace::BreakSpaces, 10.0, 1),
+            },
+            Inline::Text {
+                text: "\t\t".into(),
+                style: mono(WhiteSpace::BreakSpaces, 24.0, 2),
+            },
+        ];
+        let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+        let mut list = DisplayList::new(100.0, 400.0, hex("#ffffff"));
+        t.paint(&mut list, 0.0, 0.0);
+        let a: Vec<(f32, f32)> = list
+            .items
+            .iter()
+            .flat_map(|i| match i {
+                Item::Glyphs {
+                    x,
+                    baseline,
+                    glyphs,
+                    ..
+                } => glyphs.iter().map(|g| (x + g.x, baseline + g.y)).collect(),
+                _ => vec![],
+            })
+            .collect();
+        (t.height, a)
+    };
+    for (direction, width, height, a) in [
+        (Rtl, 12.5, 56.0, (6.484375, 10.0)),
+        (Rtl, 24.0, 20.0, (17.984375, 14.0)),
+        (Ltr, 12.5, 40.0, (0.0, 14.0)),
+        (Ltr, 24.0, 20.0, (0.0, 14.0)),
+    ] {
+        let (h, glyphs) = run(direction, width);
+        assert_eq!(
+            (h, glyphs.len()),
+            (height, 1),
+            "{direction:?} at width {width}: {glyphs:?}"
+        );
+        assert!(
+            (glyphs[0].0 - a.0).abs() <= 1.0 / 64.0 && glyphs[0].1 == a.1,
+            "{direction:?} at width {width}: a at {:?}, Chromium {a:?}",
+            glyphs[0]
+        );
+    }
+}

@@ -246,6 +246,7 @@ struct Pen {
     gap: f32,
     total: f32,
     item: f32,
+    tab: f32,
 }
 
 impl Pen {
@@ -256,6 +257,7 @@ impl Pen {
             gap,
             total: 0.0,
             item: 0.0,
+            tab: 0.0,
         }
     }
 
@@ -561,7 +563,7 @@ impl<'a> Para<'a> {
         for i in 1..n {
             let (p, q) = (&g[i - 1], &g[i]);
             let hard = p.level != q.level || p.tab || q.tab || p.nl || q.nl || p.cr || q.cr;
-            item_break[i] = hard || p.span != q.span;
+            item_break[i] = hard && !(p.tab && q.tab && p.level == q.level) || p.span != q.span;
             shape_break[i] = hard
                 || p.atom
                 || q.atom
@@ -820,7 +822,19 @@ impl<'a> Para<'a> {
             pen.item = 0.0;
         }
         let a = if g.tab {
-            self.tab_advance(g.span, pen.total + pen.item)
+            let x = pen.total + pen.item;
+            let run =
+                |j: usize| self.g[j].tab && self.g[j].span == g.span && self.g[j].level == g.level;
+            if k == pen.ls || !run(k - 1) {
+                pen.tab = x;
+            }
+            let rtl = g.level % 2 == 1;
+            let edge = if rtl {
+                !self.g.get(k + 1).is_some_and(|_| run(k + 1))
+            } else {
+                k == 0 || !run(k - 1)
+            };
+            self.tab_advance(g.span, if edge { pen.tab } else { 0.0 })
         } else {
             adv(k)
         };

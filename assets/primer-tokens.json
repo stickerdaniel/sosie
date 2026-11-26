@@ -1,0 +1,34 @@
+{
+	"package": "@primer/primitives@11.10.0",
+	"fontStack": "\"Mona Sans VF\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Noto Sans Backtick Fix\", \"Noto Sans\", Helvetica, Arial, sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\"",
+	"themes": {
+		"light": {
+			"bgColor-default": "#ffffff",
+			"bgColor-muted": "#f6f8fa",
+			"bgColor-neutral-muted": "#818b981f",
+			"bgColor-success-emphasis": "#1f883d",
+			"bgColor-danger-emphasis": "#cf222e",
+			"borderColor-default": "#d1d9e0",
+			"borderColor-muted": "#d1d9e0b3",
+			"borderColor-emphasis": "#818b98",
+			"fgColor-default": "#1f2328",
+			"fgColor-muted": "#59636e",
+			"fgColor-success": "#1a7f37",
+			"fgColor-danger": "#d1242f"
+		},
+		"dark": {
+			"bgColor-default": "#0d1117",
+			"bgColor-muted": "#151b23",
+			"bgColor-neutral-muted": "#656c7633",
+			"bgColor-success-emphasis": "#238636",
+			"bgColor-danger-emphasis": "#da3633",
+			"borderColor-default": "#3d444d",
+			"borderColor-muted": "#3d444db3",
+			"borderColor-emphasis": "#656c76",
+			"fgColor-default": "#f0f6fc",
+			"fgColor-muted": "#9198a1",
+			"fgColor-success": "#3fb950",
+			"fgColor-danger": "#f85149"
+		}
+	}
+}

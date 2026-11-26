@@ -47,6 +47,11 @@ pub enum Item {
         shape: Shape,
         color: Rgba,
     },
+    ClippedFill {
+        shape: Shape,
+        clip: Shape,
+        color: Rgba,
+    },
     Border {
         shape: Shape,
         width: f32,

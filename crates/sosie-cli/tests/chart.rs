@@ -56,6 +56,7 @@ fn chart_replaces_both_files_with_webp_and_prints_their_paths() {
     fs::write(dir.join("bars-dark.webp"), "old dark").unwrap();
     let out = sosie(&dir, &["chart", "metrics.json", "bars"]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(stderr(&out), "");
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
         "bars-light.webp\nbars-dark.webp\n"
@@ -65,6 +66,38 @@ fn chart_replaces_both_files_with_webp_and_prints_their_paths() {
     assert_eq!(
         names(&dir),
         set(&["metrics.json", "bars-light.webp", "bars-dark.webp"])
+    );
+}
+
+#[test]
+fn a_wrapped_name_warns_on_stderr_and_still_writes_both_files() {
+    let dir = scratch("wrapped");
+    fs::write(
+        dir.join("long.json"),
+        r#"{ "metrics": [
+            { "name": "Bundle", "unit": "kB", "before": 292.5, "after": 297.2, "lowerIsBetter": true },
+            { "name": "First Contentful Paint on a cold cache", "unit": "ms", "before": 1136, "after": 588, "lowerIsBetter": true }
+        ] }"#,
+    )
+    .unwrap();
+    let out = sosie(&dir, &["chart", "--format", "png", "long.json", "bars"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(
+        stderr(&out),
+        "sosie: warning: metrics[1] name wraps onto 2 lines in the 250 px name column: \"First Contentful Paint on a cold cache\"; a shorter name keeps the row on one line\n"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "bars-light.png\nbars-dark.png\n"
+    );
+    assert_eq!(
+        names(&dir),
+        set(&[
+            "metrics.json",
+            "long.json",
+            "bars-light.png",
+            "bars-dark.png"
+        ])
     );
 }
 
@@ -102,7 +135,7 @@ fn png_output_equals_core_encode_png_at_978_px() {
         (Theme::Light, "bars-light.png"),
         (Theme::Dark, "bars-dark.png"),
     ] {
-        let list = chart::render(&fonts, &chart, theme, 978).unwrap();
+        let list = chart::render(&fonts, &chart, theme, 978).unwrap().list;
         let pixmap = rasterize(&fonts, &list, 2.0, &Default::default()).unwrap();
         let bytes = fs::read(dir.join(file)).unwrap();
         assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "{file}");
@@ -139,7 +172,7 @@ fn usage_and_chart_errors_exit_2() {
         &["chart", "metrics.json"],
         &["chart", "metrics.json", "bars", "--format", "gif"],
         &["chart", "metrics.json", "bars", "--width", "wide"],
-        &["chart", "metrics.json", "bars", "--width", "309"],
+        &["chart", "metrics.json", "bars", "--width", "645"],
     ] {
         let out = sosie(&dir, args);
         assert_eq!(out.status.code(), Some(2), "{args:?}: {}", stderr(&out));
@@ -160,6 +193,19 @@ fn help_names_the_receivers_that_need_png() {
         "desk albums",
     ] {
         assert!(help.contains(receiver), "{receiver}");
+    }
+}
+
+#[test]
+fn help_names_the_wrapped_name_warning_and_the_width_range() {
+    let out = sosie(&scratch("help-warning"), &["--help"]);
+    let help = String::from_utf8_lossy(&out.stdout);
+    for text in [
+        "250 px name column",
+        "prints a warning to stderr",
+        "646 to 4096",
+    ] {
+        assert!(help.contains(text), "{text}");
     }
 }
 

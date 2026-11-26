@@ -12,7 +12,9 @@ mod script;
 mod shape;
 pub mod text;
 
-pub use chart::{Chart, ChartError, Metric, MetricError, Palette, Theme, Tone};
+pub use chart::{
+    Chart, ChartError, Metric, MetricError, Palette, Rendered, Theme, Tone, WrappedName,
+};
 pub use color::Rgba;
 pub use display::{DisplayList, GlyphPos, Item, Radii, Rect, Shape};
 pub use fonts::{FaceId, Family, FamilyList, FontError, Fonts, Pack};

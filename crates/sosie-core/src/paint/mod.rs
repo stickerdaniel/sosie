@@ -148,14 +148,32 @@ impl Renderer<'_> {
                     shapes::path(&scale_shape(shape, d)),
                     shapes::path(&scale_shape(clip, d)),
                 ) {
-                    self.clipped_fill(&p, &c, *color);
+                    self.clipped_fill(&p, &c, FillRule::Winding, *color, |_, _| true);
                 }
             }
             Item::Border {
                 shape,
                 width,
                 color,
-            } => self.border(shape, *width, *color),
+            } => self.border(shape, None, *width, *color),
+            Item::ClippedBorder {
+                shape,
+                clip,
+                width,
+                color,
+            } => self.border(shape, Some(clip), *width, *color),
+            Item::Polygons { polygons, color } => {
+                if let Some(p) = shapes::polygons(polygons, self.dpr) {
+                    self.fill(&p, *color, FillRule::Winding);
+                }
+            }
+            Item::Hatch {
+                shape,
+                clip,
+                color,
+                stripe,
+                period,
+            } => self.hatch(shape, clip, *color, *stripe, *period),
             Item::Glyphs {
                 face,
                 size,
@@ -198,7 +216,7 @@ impl Renderer<'_> {
         }
     }
 
-    fn border(&mut self, shape: &Shape, width: f32, color: Rgba) {
+    fn border(&mut self, shape: &Shape, clip: Option<&Shape>, width: f32, color: Rgba) {
         if !width.is_finite() || width <= 0.0 {
             return;
         }
@@ -228,9 +246,33 @@ impl Renderer<'_> {
         if let Some(i) = shapes::path(&inner) {
             pb.push_path(&i);
         }
-        if let Some(ring) = pb.finish() {
-            self.fill(&ring, color, FillRule::EvenOdd);
+        let Some(ring) = pb.finish() else {
+            return;
+        };
+        match clip.map(|c| shapes::path(&scale_shape(c, self.dpr))) {
+            None => self.fill(&ring, color, FillRule::EvenOdd),
+            Some(Some(c)) => self.clipped_fill(&ring, &c, FillRule::EvenOdd, color, |_, _| true),
+            Some(None) => {}
         }
+    }
+
+    fn hatch(&mut self, shape: &Shape, clip: &Shape, color: Rgba, stripe: f32, period: f32) {
+        let valid = |v: f32| v.is_finite() && v > 0.0;
+        if !valid(stripe) || !valid(period) {
+            return;
+        }
+        let d = self.dpr;
+        let (Some(p), Some(c)) = (
+            shapes::path(&scale_shape(shape, d)),
+            shapes::path(&scale_shape(clip, d)),
+        ) else {
+            return;
+        };
+        let (x0, y0) = (shape.rect.x * d, shape.rect.y * d);
+        self.clipped_fill(&p, &c, FillRule::Winding, color, |x, y| {
+            let along = (x + 0.5 - x0 + (y + 0.5 - y0)) / d * std::f32::consts::FRAC_1_SQRT_2;
+            along - (along / period).floor() * period < stripe
+        });
     }
 
     fn region(&self, path: &Path) -> Option<Region> {
@@ -261,19 +303,33 @@ impl Renderer<'_> {
         }
     }
 
-    fn clipped_fill(&mut self, path: &Path, clip: &Path, color: Rgba) {
+    fn clipped_fill(
+        &mut self,
+        path: &Path,
+        clip: &Path,
+        rule: FillRule,
+        color: Rgba,
+        paints: impl Fn(f32, f32) -> bool,
+    ) {
         if color.a == 0 {
             return;
         }
         let Some(r) = self.region(path) else {
             return;
         };
-        let mask = |p: &Path| coverage::mask_small(p, r.w, r.h, FillRule::Winding, r.left, r.top);
-        let (Some(mut cov), Some(clip)) = (mask(path), mask(clip)) else {
+        let (Some(mut cov), Some(clip)) = (
+            coverage::mask_small(path, r.w, r.h, rule, r.left, r.top),
+            coverage::mask_small(clip, r.w, r.h, FillRule::Winding, r.left, r.top),
+        ) else {
             return;
         };
-        for (a, b) in cov.iter_mut().zip(clip) {
-            *a = ((*a as u32 * b as u32 + 127) / 255) as u8;
+        for (i, (a, b)) in cov.iter_mut().zip(clip).enumerate() {
+            let (x, y) = ((i as u32 % r.w) as f32, (i as u32 / r.w) as f32);
+            *a = if paints(r.left + x, r.top + y) {
+                ((*a as u32 * b as u32 + 127) / 255) as u8
+            } else {
+                0
+            };
         }
         self.blit(&cov, r.w, r.h, r.left as i64, r.top as i64, color, None);
     }

@@ -24,7 +24,8 @@ Adapted
                         parse_hex builds the struct directly
   paint/coverage.rs     from paint/coverage.rs, mask_transformed removed,
                         mask and SUBSAMPLES limited to tests
-  paint/encode.rs       from paint/encode.rs, encode_png_best removed
+  paint/encode.rs       from paint/encode.rs, encode_png_best removed,
+                        Balanced compression with Adaptive filters
   shape.rs              from shape.rs, plan key reduced to face, direction
                         and script, chws feature on the CJK face, advances
                         from the 26.6 size or the bitmap strike

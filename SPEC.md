@@ -6,6 +6,7 @@ This file states what the core guarantees, how each guarantee is checked, and th
 
 - Input: a paragraph of styled inline spans and inline boxes, laid out at a CSS width.
 - Output: line geometry, a display list, and an RGBA pixmap or PNG at a device pixel ratio from 1 to 4.
+- PNG output is lossless: 8-bit RGBA, compressed at png's `Balanced` level with `Adaptive` filters. It decodes to the pixmap byte for byte, checked by `png_decodes_to_the_rasterized_pixels`.
 - The core opens no file, makes no network call, and reads no clock. Every crate root carries `#![forbid(unsafe_code)]`, checked by `tools/check-forbid-unsafe.sh`.
 
 ## Fonts
@@ -107,7 +108,7 @@ Text captures: 384. Fill captures: 96. 56 captures lie above B, none above 1.5 %
 
 ### Determinism
 
-`tests/determinism.json` pins the PNG SHA-256 of four cases (ASCII, emoji, CJK, RTL) at 784 px and dpr 2. The same hashes hold on linux-x64 and darwin-arm64. CI runs the test on both.
+`crates/sosie-core/tests/determinism.json` pins the PNG SHA-256 of four cases (ASCII, emoji, CJK, RTL) at 784 px and dpr 2. The same hashes hold on linux-x64 and darwin-arm64. CI runs the test on both.
 
 ## Bench
 

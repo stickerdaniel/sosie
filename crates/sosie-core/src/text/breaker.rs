@@ -64,6 +64,7 @@ pub(super) struct Breaker<'b, 'a> {
     items: Vec<Item>,
     pad: Vec<f32>,
     zw: Vec<bool>,
+    hang: Vec<usize>,
     icu: Vec<bool>,
     fit: f32,
     item: usize,
@@ -175,6 +176,14 @@ impl<'b, 'a> Breaker<'b, 'a> {
             }
             hs = k + 1;
         }
+        let mut hang = vec![0; n + 1];
+        for e in 1..=n {
+            hang[e] = if zw[e] || !sp(&p.g[e - 1]) {
+                e
+            } else {
+                hang[e - 1]
+            };
+        }
         let pad = p
             .styles
             .iter()
@@ -186,6 +195,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
             items,
             pad,
             zw,
+            hang,
             icu,
             fit: p.avail + 1.0 / 64.0,
             item: 0,
@@ -342,13 +352,8 @@ impl<'b, 'a> Breaker<'b, 'a> {
         !g[k - 1].cr && !g[k].cr && self.icu[k]
     }
 
-    fn hang_start(&self, mut e: usize) -> usize {
-        loop {
-            if e == 0 || self.zw[e] || !sp(&self.p.g[e - 1]) {
-                return e;
-            }
-            e -= 1;
-        }
+    fn hang_start(&self, e: usize) -> usize {
+        self.hang[e]
     }
 
     fn with_hang(&self, k: usize, first: usize) -> (usize, Option<usize>) {

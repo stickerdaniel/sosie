@@ -2613,6 +2613,40 @@ fn spread_negative_trims_and_many_spans_cost_like_linear_controls() {
 }
 
 #[test]
+fn long_break_spaces_whitespace_runs_scale_linearly() {
+    let st = TextStyle {
+        family: FamilyList::parse(MONO),
+        size: 10.0,
+        line_height: 16.0,
+        tab_size: 1,
+        ..style(MONO, WhiteSpace::Normal)
+    };
+    let p = Paragraph {
+        width: 0.75,
+        strut: st.clone(),
+        overflow_wrap: OverflowWrap::Normal,
+        direction: Direction::Ltr,
+    };
+    for (what, unit) in [("break-spaces spaces", " "), ("break-spaces tabs", "\t")] {
+        let run = |n: usize| {
+            let inlines = [Inline::Text {
+                text: format!("a{}\nc", unit.repeat(n)),
+                style: TextStyle {
+                    white_space: WhiteSpace::BreakSpaces,
+                    ..st.clone()
+                },
+            }];
+            let t0 = std::time::Instant::now();
+            let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+            let took = t0.elapsed();
+            assert!(t.lines.len() > n, "{what}: {} lines", t.lines.len());
+            took
+        };
+        assert_scales_linearly(what, 4_000, run);
+    }
+}
+
+#[test]
 fn unsafe_shaping_cuts_scale_linearly() {
     let st = TextStyle {
         family: FamilyList::parse(SANS),

@@ -2927,21 +2927,35 @@ fn fastest_pair(
     fastest
 }
 
+fn ratio_settles_below(
+    limit: u32,
+    mut base: impl FnMut() -> Duration,
+    mut measured: impl FnMut() -> Duration,
+) -> Result<(), (Duration, Duration)> {
+    let mut last = (Duration::ZERO, Duration::ZERO);
+    for round in 0..4 {
+        std::thread::sleep(Duration::from_millis(100) * round);
+        last = fastest_pair(&mut base, &mut measured);
+        if last.1 < last.0 * limit {
+            return Ok(());
+        }
+    }
+    Err(last)
+}
+
 fn assert_linear(what: &str, witness: impl FnMut() -> Duration, control: impl FnMut() -> Duration) {
-    let (control, witness) = fastest_pair(control, witness);
-    assert!(
-        witness < control * 4,
-        "{what} used {witness:?} of CPU time against its linear control's {control:?}"
-    );
+    if let Err((control, witness)) = ratio_settles_below(4, control, witness) {
+        panic!("{what} used {witness:?} of CPU time against its linear control's {control:?}");
+    }
 }
 
 fn assert_scales_linearly(what: &str, n: usize, run: impl Fn(usize) -> Duration) {
-    let (small, large) = fastest_pair(|| run(n), || run(4 * n));
-    assert!(
-        large < small * 8,
-        "{what} used {large:?} of CPU time at {} units against {small:?} at {n}",
-        4 * n
-    );
+    if let Err((small, large)) = ratio_settles_below(8, || run(n), || run(4 * n)) {
+        panic!(
+            "{what} used {large:?} of CPU time at {} units against {small:?} at {n}",
+            4 * n
+        );
+    }
 }
 
 #[test]

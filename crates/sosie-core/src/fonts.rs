@@ -259,11 +259,14 @@ impl Face {
             .is_some()
     }
 
-    pub fn rounded_metrics(&self, size: f32) -> (f32, f32) {
-        (
-            (self.ascent * size / self.upem).round(),
-            (self.descent * size / self.upem).round(),
-        )
+    pub fn rounded_metrics(&self, size: f32, subpixel: bool) -> (f32, f32) {
+        let descent = self.descent * size / self.upem;
+        let (a, d) = ((self.ascent * size / self.upem).round(), descent.round());
+        if subpixel && d < descent && a >= 1.0 {
+            (a - 1.0, d + 1.0)
+        } else {
+            (a, d)
+        }
     }
 }
 

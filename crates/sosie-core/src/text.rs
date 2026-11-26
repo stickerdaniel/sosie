@@ -71,6 +71,7 @@ pub struct Paragraph {
     pub strut: TextStyle,
     pub overflow_wrap: OverflowWrap,
     pub direction: Direction,
+    pub dpr: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -281,6 +282,7 @@ struct Para<'a> {
     rtl_base: bool,
     strut: (f32, f32),
     tab_space: f32,
+    subpixel: bool,
 }
 
 fn space_width(fonts: &Fonts, face: FaceId, size: f32) -> f32 {
@@ -289,10 +291,15 @@ fn space_width(fonts: &Fonts, face: FaceId, size: f32) -> f32 {
     gl.iter().map(|g| g.adv).sum()
 }
 
-fn half_leading(fonts: &Fonts, face: FaceId, size: f32, line_height: f32) -> (f32, f32) {
-    let f = fonts.expect(face);
-    let (asc, desc) = (f.ascent * size / f.upem, f.descent * size / f.upem);
-    let above = asc.round() + ((line_height - (asc + desc)) / 2.0).floor();
+fn half_leading(
+    fonts: &Fonts,
+    face: FaceId,
+    size: f32,
+    line_height: f32,
+    subpixel: bool,
+) -> (f32, f32) {
+    let (asc, desc) = fonts.expect(face).rounded_metrics(size, subpixel);
+    let above = asc + ((line_height - (asc + desc)) / 2.0).floor();
     (above, line_height - above)
 }
 
@@ -324,6 +331,7 @@ enum End {
 struct Collapsed {
     text: String,
     span_of: Vec<usize>,
+    opportunity: Option<usize>,
 }
 
 impl Collapsed {
@@ -352,11 +360,38 @@ impl Collapsed {
     }
 
     fn removes_newline(&self, before_space: bool, next: Option<char>) -> bool {
-        let mut rev = self.text.chars().rev();
+        let mut end = self.text.len();
         if before_space {
-            rev.next();
+            end -= self.text.chars().next_back().map_or(0, char::len_utf8);
         }
-        rev.next() == Some(ZWSP) || next == Some(ZWSP)
+        self.text[..end].ends_with(ZWSP) || self.opportunity == Some(end) || next == Some(ZWSP)
+    }
+
+    fn preserved(&mut self, t: &str, span: usize, wraps: bool) -> End {
+        let mut leading = wraps && matches!(self.text.chars().next_back(), None | Some('\n'));
+        let mut run = false;
+        let mut last = End::Kept;
+        for c in t.chars() {
+            if run && c != ' ' {
+                self.opportunity = Some(self.text.len());
+                run = false;
+            }
+            run |= leading && c == ' ';
+            leading = wraps && c == '\n';
+            self.push(c, span);
+            last = if c == '\n' {
+                End::Collapsible {
+                    newline: false,
+                    space: false,
+                }
+            } else {
+                End::Kept
+            };
+        }
+        if run {
+            self.opportunity = Some(self.text.len());
+        }
+        last
     }
 
     fn normal(&mut self, t: &str, span: usize, last: End) -> End {
@@ -436,6 +471,7 @@ fn collapse(
     let mut out = Collapsed {
         text: String::new(),
         span_of: Vec::new(),
+        opportunity: None,
     };
     let mut styles = Vec::new();
     let mut last = End::Start;
@@ -452,17 +488,11 @@ fn collapse(
                     last = out.normal(t, idx, last);
                     continue;
                 }
-                for c in t.chars() {
-                    out.push(c, idx);
-                    last = if c == '\n' {
-                        End::Collapsible {
-                            newline: false,
-                            space: false,
-                        }
-                    } else {
-                        End::Kept
-                    };
-                }
+                let wraps = matches!(
+                    style.white_space,
+                    WhiteSpace::PreWrap | WhiteSpace::BreakSpaces
+                );
+                last = out.preserved(t, idx, wraps);
             }
             Inline::Box(b) => {
                 let mut st = resolve(fonts, strut);
@@ -479,7 +509,9 @@ fn collapse(
     if let End::Collapsible { space: true, .. } = last {
         out.remove_space(false);
     }
-    let Collapsed { text, mut span_of } = out;
+    let Collapsed {
+        text, mut span_of, ..
+    } = out;
     span_of.push(styles.len().saturating_sub(1));
     (text, span_of, styles)
 }
@@ -594,11 +626,13 @@ impl<'a> Para<'a> {
             }
         }
         let strut_style = resolve(fonts, &para.strut);
+        let subpixel = para.dpr > 1.0;
         let strut = half_leading(
             fonts,
             strut_style.primary,
             para.strut.size,
             para.strut.line_height,
+            subpixel,
         );
         let mut p = Para {
             fonts,
@@ -615,6 +649,7 @@ impl<'a> Para<'a> {
             rtl_base,
             strut,
             tab_space: space_width(fonts, strut_style.primary, para.strut.size),
+            subpixel,
         };
         p.adv = p.shape_range(0, n).0;
         p
@@ -987,11 +1022,19 @@ impl<'a> Para<'a> {
             .sum();
         let full = full + hang_pad;
         let normal = |k: usize| self.styles[self.g[k].span].ws == WhiteSpace::Normal;
+        let base = u8::from(self.rtl_base);
+        let own = |k: usize| normal(k) && self.g[k].span == self.g[t - 1].span;
         let hang_run = hang_pad > 0.0
-            && (t..le).any(|k| !normal(k))
-            && (t..le).any(|k| {
-                normal(k) && self.g[k].span == self.g[t - 1].span && !b.collapsed.contains(&k)
-            });
+            && ((t..le).any(|k| !normal(k))
+                && (t..le).any(|k| own(k) && !b.collapsed.contains(&k))
+                || self.g[t - 1].level != base
+                    && ((t..le).any(|k| self.g[k].cr)
+                        || b.forced
+                            && self.g.get(le).is_some_and(|g| {
+                                g.nl && self.text[g.start..g.end].starts_with('\r')
+                            }))
+                    && (t..le)
+                        .any(|k| own(k) && self.g[k].pad_after > 0.0 && self.g[k].level == base));
         let soft = le < self.g.len() && !self.g[le].nl;
         let trim = if (self.wrap || soft) && full > self.avail && t > ls {
             self.end_trim(t)
@@ -1025,7 +1068,13 @@ impl<'a> Para<'a> {
             let st = &self.styles[span];
             let (a, b) = match st.atom {
                 Some((_, bx)) => (bx.height, 0.0),
-                None => half_leading(self.fonts, st.primary, st.size, st.line_height),
+                None => half_leading(
+                    self.fonts,
+                    st.primary,
+                    st.size,
+                    st.line_height,
+                    self.subpixel,
+                ),
             };
             above = above.max(a);
             below = below.max(b);
@@ -1135,7 +1184,7 @@ impl<'a> Para<'a> {
             let st = &self.styles[span];
             if let Some(bg) = st.background {
                 let face = self.fonts.expect(st.primary);
-                let (ascent, descent) = face.rounded_metrics(st.size);
+                let (ascent, descent) = face.rounded_metrics(st.size, self.subpixel);
                 let x0 = (s..k).map(|j| vpos[j - ls].0).fold(f32::INFINITY, f32::min)
                     - self.g[s].pad_before;
                 let x1 = (s..k)

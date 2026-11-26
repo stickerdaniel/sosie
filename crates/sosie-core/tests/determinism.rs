@@ -25,6 +25,7 @@ fn render(fonts: &Fonts, text: &str, direction: Direction) -> Vec<u8> {
         strut: style.clone(),
         overflow_wrap: OverflowWrap::Anywhere,
         direction,
+        dpr: 2.0,
     };
     let bold = TextStyle {
         weight: 600,

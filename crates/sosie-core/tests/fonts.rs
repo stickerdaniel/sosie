@@ -41,6 +41,7 @@ fn faces(fonts: &Fonts, text: &str, style: TextStyle) -> Vec<&'static str> {
         strut: style.clone(),
         overflow_wrap: OverflowWrap::Anywhere,
         direction: Direction::Auto,
+        dpr: 1.0,
     };
     let t = layout(
         fonts,

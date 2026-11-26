@@ -32,6 +32,7 @@ fn para(
         strut: style(SANS, white_space),
         overflow_wrap,
         direction,
+        dpr: 1.0,
     }
 }
 
@@ -436,6 +437,7 @@ fn break_spaces_may_break_between_preserved_spaces() {
         strut: mono.clone(),
         overflow_wrap: OverflowWrap::Normal,
         direction: Direction::Ltr,
+        dpr: 1.0,
     };
     let t = layout(
         &fonts,
@@ -505,6 +507,7 @@ fn an_rtl_ligature_paints_where_chromium_puts_it() {
         strut: st.clone(),
         overflow_wrap: OverflowWrap::Normal,
         direction: Direction::Rtl,
+        dpr: 1.0,
     };
     for (word, left, ink_x, ink_y) in [
         ("لا", 25.078125, (27, 55), (16, 58)),
@@ -566,6 +569,7 @@ fn break_spaces_may_break_after_each_preserved_tab() {
         strut: mono.clone(),
         overflow_wrap: OverflowWrap::Normal,
         direction: Direction::Ltr,
+        dpr: 1.0,
     };
     let t = layout(
         &fonts,
@@ -604,6 +608,7 @@ fn trimmed_cjk_brackets_paint_inside_the_measured_box() {
             strut: st.clone(),
             overflow_wrap: OverflowWrap::Normal,
             direction: Direction::Ltr,
+            dpr: 1.0,
         };
         let inlines: Vec<Inline> = parts
             .iter()
@@ -662,6 +667,7 @@ fn pre_wrap_whitespace_may_break_before_break_spaces_whitespace() {
         strut: mono(WhiteSpace::BreakSpaces),
         overflow_wrap: OverflowWrap::Normal,
         direction: Direction::Ltr,
+        dpr: 1.0,
     };
     for (first, second, b_left) in [("a\t", "\tb", 6.015625), ("a ", " b", 6.0)] {
         let t = layout(
@@ -756,6 +762,7 @@ fn an_rtl_trimmed_bracket_paints_where_chromium_puts_it() {
             strut: cjk(14.0, "#000000"),
             overflow_wrap: OverflowWrap::Normal,
             direction,
+            dpr: 1.0,
         };
         let t = layout(
             &fonts,
@@ -787,6 +794,7 @@ fn a_cjk_trim_uses_the_trimmed_characters_own_size() {
         strut: cjk(14.0, "#000000"),
         overflow_wrap: OverflowWrap::Normal,
         direction: Direction::Ltr,
+        dpr: 1.0,
     };
     for (first, second, advance, left, ink) in [
         (14.0, 60.0, 141.0, 41.0, (43, 158)),
@@ -875,6 +883,7 @@ fn whitespace_after_a_break_hangs_like_chromium() {
             strut: mono(B),
             overflow_wrap,
             direction: Direction::Ltr,
+            dpr: 1.0,
         };
         let inlines: Vec<Inline> = parts
             .iter()
@@ -926,6 +935,7 @@ fn unmirrored_punctuation_keeps_its_trim_side_in_rtl() {
                 strut: cjk(14.0, "#000000"),
                 overflow_wrap: OverflowWrap::Normal,
                 direction,
+                dpr: 1.0,
             };
             let t = layout(
                 &fonts,
@@ -976,6 +986,7 @@ fn mono_wrapped(
         strut: mono(WhiteSpace::BreakSpaces),
         overflow_wrap,
         direction: Direction::Ltr,
+        dpr: 1.0,
     };
     let inlines: Vec<Inline> = parts
         .iter()
@@ -1104,6 +1115,7 @@ fn a_spans_own_white_space_governs_wrapping_inside_it() {
             strut: mono(strut),
             overflow_wrap: OverflowWrap::Normal,
             direction: Direction::Ltr,
+            dpr: 1.0,
         };
         let t = layout(
             &fonts,
@@ -1160,6 +1172,7 @@ fn a_break_between_spans_follows_the_span_before_it_or_the_strut() {
             strut: mono(strut),
             overflow_wrap: OverflowWrap::Normal,
             direction: Direction::Ltr,
+            dpr: 1.0,
         };
         let t = layout(
             &fonts,
@@ -1266,6 +1279,7 @@ fn mono_padded(
         strut: mono(strut.0, strut.1),
         overflow_wrap,
         direction,
+        dpr: 1.0,
     };
     let inlines: Vec<Inline> = parts
         .iter()
@@ -1517,6 +1531,7 @@ fn trimmed_line_end(strut: WhiteSpace, direction: Direction) -> (Vec<(f32, f32)>
         strut: cjk(strut),
         overflow_wrap: OverflowWrap::Normal,
         direction,
+        dpr: 1.0,
     };
     let t = layout(
         &fonts,
@@ -1591,6 +1606,7 @@ fn an_overridden_line_end_bracket_paints_inside_the_line() {
         },
         overflow_wrap: OverflowWrap::Normal,
         direction: Direction::Ltr,
+        dpr: 1.0,
     };
     let t = layout(
         &fonts,
@@ -2125,6 +2141,7 @@ fn assert_chromium_rows(rows: impl IntoIterator<Item = ChromiumRow>) {
             },
             overflow_wrap,
             direction,
+            dpr: 1.0,
         };
         let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
         let what = format!("{} inlines {direction:?} at width {width}", inlines.len());
@@ -2608,6 +2625,7 @@ fn an_inline_box_before_a_break_spaces_space_keeps_its_line() {
             strut: mono(W, 16.0),
             overflow_wrap: OverflowWrap::Normal,
             direction: Direction::Ltr,
+            dpr: 1.0,
         };
         let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
         let what = format!("{:?}", inlines[0]);
@@ -2695,6 +2713,7 @@ fn an_inline_box_before_pre_whitespace_breaks_like_chromium() {
             strut: mono(N, strut.0, strut.1),
             overflow_wrap: OverflowWrap::Normal,
             direction: Direction::Ltr,
+            dpr: 1.0,
         };
         let t = layout(&all_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
         let mut list = DisplayList::new(100.0, 400.0, hex("#ffffff"));
@@ -2744,6 +2763,7 @@ fn many_preserved_newlines_lay_out_in_linear_time() {
         strut: st.clone(),
         overflow_wrap: OverflowWrap::Normal,
         direction: Direction::Ltr,
+        dpr: 1.0,
     };
     let start = std::time::Instant::now();
     let t = layout(
@@ -2777,6 +2797,7 @@ fn long_carriage_return_runs_scale_linearly() {
         strut: st.clone(),
         overflow_wrap: OverflowWrap::Normal,
         direction: Direction::Rtl,
+        dpr: 1.0,
     };
     assert_scales_linearly("carriage returns", 20_000, |n| {
         let inlines = [Inline::Text {
@@ -2826,6 +2847,7 @@ fn long_lines_and_unbreakable_words_lay_out_in_linear_time() {
             strut: st.clone(),
             overflow_wrap: OverflowWrap::Anywhere,
             direction: Direction::Ltr,
+            dpr: 1.0,
         };
         let start = std::time::Instant::now();
         let t = layout(&fonts, &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
@@ -2860,6 +2882,7 @@ fn trimmed_cjk_punctuation_never_moves_the_pen_backwards() {
         strut: st.clone(),
         overflow_wrap: OverflowWrap::Anywhere,
         direction: Direction::Ltr,
+        dpr: 1.0,
     };
     for size in [0.01, 0.02, 0.05] {
         let inlines = [text("x", &st), text("。。", &cjk(size)), text("y", &st)];
@@ -2971,6 +2994,7 @@ fn spread_negative_trims_and_many_spans_cost_like_linear_controls() {
             strut: strut.clone(),
             overflow_wrap: OverflowWrap::Anywhere,
             direction: Direction::Ltr,
+            dpr: 1.0,
         };
         let fonts = shared_fonts();
         let start = std::time::Instant::now();
@@ -3027,6 +3051,7 @@ fn long_break_spaces_whitespace_runs_scale_linearly() {
         strut: st.clone(),
         overflow_wrap: OverflowWrap::Normal,
         direction: Direction::Ltr,
+        dpr: 1.0,
     };
     for (what, unit) in [("break-spaces spaces", " "), ("break-spaces tabs", "\t")] {
         let run = |n: usize| {
@@ -3098,6 +3123,7 @@ fn unsafe_shaping_cuts_scale_linearly() {
             strut: st.clone(),
             overflow_wrap,
             direction: Direction::Ltr,
+            dpr: 1.0,
         };
         assert_scales_linearly(what, count, |n| {
             let inlines = [Inline::Text {
@@ -3486,6 +3512,7 @@ fn an_rtl_tab_run_gives_its_position_advance_to_the_last_tab() {
             strut: mono(WhiteSpace::Normal, 10.0, 2),
             overflow_wrap: OverflowWrap::Anywhere,
             direction,
+            dpr: 1.0,
         };
         let inlines = [
             Inline::Text {
@@ -3533,4 +3560,166 @@ fn an_rtl_tab_run_gives_its_position_advance_to_the_last_tab() {
             glyphs[0]
         );
     }
+}
+
+#[test]
+fn line_metrics_round_ascent_and_descent_like_chromium_at_each_dpr() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P};
+    let mono = |white_space, size, line_height| TextStyle {
+        family: FamilyList::parse(MONO),
+        size,
+        line_height,
+        tab_size: 1,
+        ..style(MONO, white_space)
+    };
+    let run = |strut: TextStyle, span: TextStyle, text: &str, dpr| {
+        let p = Paragraph {
+            width: 100.0,
+            strut,
+            overflow_wrap: OverflowWrap::Normal,
+            direction: Direction::Ltr,
+            dpr,
+        };
+        let inlines = [Inline::Text {
+            text: text.into(),
+            style: span,
+        }];
+        let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+        let mut list = DisplayList::new(100.0, 400.0, hex("#ffffff"));
+        t.paint(&mut list, 0.0, 0.0);
+        let baselines: Vec<f32> = list
+            .items
+            .iter()
+            .flat_map(|i| match i {
+                Item::Glyphs {
+                    baseline, glyphs, ..
+                } => glyphs.iter().map(|g| baseline + g.y).collect(),
+                _ => vec![],
+            })
+            .collect();
+        (t.height, baselines)
+    };
+    let padded = TextStyle {
+        background: Some(sosie_core::InlineBackground {
+            padding_x: 6.5,
+            padding_y: 0.0,
+            radius: 0.0,
+            color: hex("#000000"),
+        }),
+        ..mono(B, 16.0, 24.0)
+    };
+    for (dpr, t5, lf) in [
+        (1.0, (18.0, vec![12.0; 3]), (78.0, vec![18.0, 70.0])),
+        (2.0, (19.0, vec![12.0; 3]), (75.0, vec![17.0, 67.0])),
+    ] {
+        assert_eq!(
+            run(mono(N, 10.0, 16.0), mono(P, 16.0, 16.0), "abc", dpr),
+            t5,
+            "16/16 under a 10/16 strut at dpr {dpr}"
+        );
+        assert_eq!(
+            run(mono(N, 24.0, 24.0), padded.clone(), "a\n\nb", dpr),
+            lf,
+            "an LF-only 16/24 line under a 24/24 strut at dpr {dpr}"
+        );
+    }
+}
+
+#[test]
+fn a_newline_run_after_leading_preserved_spaces_collapses_away() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
+    let text = padded;
+    let ltr = ((N, 16.0), OverflowWrap::Normal, Direction::Ltr);
+    assert_chromium_rows([
+        (
+            ltr,
+            100.0,
+            vec![
+                text(B, "\n ", 10.0, 16.0, None),
+                text(N, "\nbbb", 10.0, 16.0, None),
+            ],
+            32.0,
+            ("b", (18.015625, 26.0)),
+        ),
+        (
+            ltr,
+            100.0,
+            vec![
+                text(W, "\n ", 10.0, 16.0, None),
+                text(N, "\nbbb", 10.0, 16.0, None),
+            ],
+            32.0,
+            ("b", (18.015625, 26.0)),
+        ),
+        (
+            ltr,
+            100.0,
+            vec![
+                text(B, " ", 10.0, 16.0, None),
+                text(N, "\nbbb", 10.0, 16.0, None),
+            ],
+            16.0,
+            ("b", (18.015625, 10.0)),
+        ),
+        (
+            ltr,
+            100.0,
+            vec![
+                text(P, "\n ", 10.0, 16.0, None),
+                text(N, "\nbbb", 10.0, 16.0, None),
+            ],
+            32.0,
+            ("b", (24.015625, 26.0)),
+        ),
+        (
+            ltr,
+            100.0,
+            vec![
+                text(B, "\n ", 10.0, 16.0, None),
+                text(N, "x\nbbb", 10.0, 16.0, None),
+            ],
+            32.0,
+            ("b", (30.015625, 26.0)),
+        ),
+    ]);
+}
+
+#[test]
+fn a_trailing_space_before_a_carriage_return_takes_its_span_end_padding() {
+    use WhiteSpace::{Normal as N, Pre as P};
+    let text = padded;
+    let rtl = ((N, 16.0), OverflowWrap::Normal, Direction::Rtl);
+    let rows = |tail: &str, c: f32| {
+        (
+            rtl,
+            100.0,
+            vec![
+                text(P, "c", 10.0, 16.0, None),
+                text(N, "a\n", 10.0, 16.0, Some(3.0)),
+                text(P, tail, 10.0, 16.0, None),
+                text(N, "b", 10.0, 16.0, None),
+            ],
+            32.0,
+            ("c", (c, 10.0)),
+        )
+    };
+    let pre = |width: f32, height: f32, b: f32| {
+        (
+            ((P, 16.0), OverflowWrap::Normal, Direction::Rtl),
+            width,
+            vec![
+                text(P, "b", 10.0, 16.0, None),
+                text(N, "a ", 10.0, 16.0, Some(3.0)),
+                text(P, "\r\n ", 10.0, 16.0, None),
+            ],
+            height,
+            ("b", (b, 10.0)),
+        )
+    };
+    assert_chromium_rows([
+        rows("\r\n", 84.96875),
+        rows("\n", 81.96875),
+        pre(6.0, 32.0, -9.03125),
+        pre(24.015625, 48.0, 5.984375),
+    ]);
 }

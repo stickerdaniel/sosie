@@ -62,6 +62,7 @@ fn comment() -> (Paragraph, Vec<Inline>) {
         strut: sans,
         overflow_wrap: OverflowWrap::Anywhere,
         direction: Direction::Ltr,
+        dpr: DPR,
     };
     (para, inlines)
 }

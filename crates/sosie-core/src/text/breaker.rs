@@ -38,6 +38,7 @@ pub(super) struct Break {
     pub(super) skip: Option<usize>,
     pub(super) collapsed: Vec<usize>,
     pub(super) spans: Vec<usize>,
+    pub(super) forced: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -286,6 +287,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
                     skip: self.skip.map(|(_, k)| k),
                     collapsed: std::mem::take(&mut self.collapsed),
                     spans,
+                    forced: false,
                 },
             ));
         }
@@ -304,6 +306,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
                     skip: b.skip.filter(|&k| k >= start),
                     collapsed: b.collapsed,
                     spans: b.spans,
+                    forced: lf.is_some(),
                 }
             })
             .collect()

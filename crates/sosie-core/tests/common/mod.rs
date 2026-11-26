@@ -175,6 +175,7 @@ pub fn inlines(l: &LayoutIn, fg: Rgba, code: Rgba) -> (Paragraph, Vec<Inline>) {
         strut,
         overflow_wrap,
         direction: if rtl { Direction::Auto } else { Direction::Ltr },
+        dpr: 2.0,
     };
     (para, spans)
 }

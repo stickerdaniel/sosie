@@ -1,10 +1,10 @@
 mod common;
 
-use common::{all_fonts, decode_png, hex, json, SANS};
+use common::{all_fonts, decode_png, hex, json, reference_chart, SANS};
 use sha2::{Digest, Sha256};
 use sosie_core::{
-    encode_png, layout, rasterize, Direction, DisplayList, FamilyList, Fonts, Inline, OverflowWrap,
-    Paragraph, Pixmap, TextStyle, WhiteSpace,
+    chart, encode_png, layout, rasterize, Direction, DisplayList, FamilyList, Fonts, Inline,
+    OverflowWrap, Paragraph, Pixmap, TextStyle, Theme, WhiteSpace,
 };
 use std::collections::BTreeMap;
 
@@ -54,21 +54,29 @@ const CASES: [(&str, &str, Direction); 4] = [
     ("rtl", "המעבד מצייר כל תגובה לפני שהסוכן מפרסם אותו and يرسم العارض كل تعليق", Direction::Auto),
 ];
 
+fn render_chart(fonts: &Fonts, theme: Theme) -> Pixmap {
+    let list =
+        chart::render(fonts, &reference_chart(), theme, 814).unwrap_or_else(|e| panic!("{e}"));
+    rasterize(fonts, &list, 2.0, &Default::default()).expect("render")
+}
+
+fn cases(fonts: &Fonts) -> Vec<(String, Pixmap)> {
+    let text = CASES
+        .iter()
+        .map(|(name, text, dir)| (name.to_string(), render(fonts, text, *dir)));
+    let charts = [("chart-light", Theme::Light), ("chart-dark", Theme::Dark)]
+        .into_iter()
+        .map(|(name, theme)| (name.to_string(), render_chart(fonts, theme)));
+    text.chain(charts).collect()
+}
+
 #[test]
 fn png_bytes_are_identical_on_every_platform() {
     let fonts = all_fonts();
     let expected: BTreeMap<String, String> = json("crates/sosie-core/tests/determinism.json");
-    let actual: BTreeMap<String, String> = CASES
-        .iter()
-        .map(|(name, text, dir)| {
-            (
-                name.to_string(),
-                format!(
-                    "{:x}",
-                    Sha256::digest(encode_png(&render(&fonts, text, *dir)))
-                ),
-            )
-        })
+    let actual: BTreeMap<String, String> = cases(&fonts)
+        .into_iter()
+        .map(|(name, pixmap)| (name, format!("{:x}", Sha256::digest(encode_png(&pixmap)))))
         .collect();
     assert_eq!(
         actual,
@@ -82,8 +90,7 @@ fn png_bytes_are_identical_on_every_platform() {
 #[test]
 fn png_decodes_to_the_rasterized_pixels() {
     let fonts = all_fonts();
-    for (name, text, dir) in CASES {
-        let pixmap = render(&fonts, text, dir);
+    for (name, pixmap) in cases(&fonts) {
         let (w, h, rgba) = decode_png(&encode_png(&pixmap));
         assert_eq!((w, h), (pixmap.width, pixmap.height), "{name}: size");
         assert!(rgba == pixmap.rgba, "{name}: decoded pixels differ");

@@ -34,7 +34,9 @@ Adapted
                         per-cluster font fallback and bidi line order
   paint/mod.rs          from paint/mod.rs, display list items reduced to
                         fills, borders, glyph runs and text backgrounds,
-                        device size checked against Limits before allocation
+                        device size checked against Limits before allocation,
+                        and a clipped fill that multiplies the fill's coverage
+                        mask with its clip's coverage mask, written for sosie
   paint/glyph.rs        from paint/glyph.rs, outline y snapped to 1/4 px,
                         quadratics chopped at y extrema and flattened with
                         Skia subdivision counts, embedded Skia mask gamma

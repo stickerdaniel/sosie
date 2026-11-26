@@ -2,8 +2,8 @@
 
 use serde::Deserialize;
 use sosie_core::{
-    layout, Direction, DisplayList, FamilyList, Fonts, Inline, InlineBackground, Item,
-    OverflowWrap, Paragraph, Radii, Rect, Rgba, Shape, TextLayout, TextStyle, WhiteSpace,
+    layout, Chart, Direction, DisplayList, FamilyList, Fonts, Inline, InlineBackground, Item,
+    Metric, OverflowWrap, Paragraph, Radii, Rect, Rgba, Shape, TextLayout, TextStyle, WhiteSpace,
 };
 use std::path::{Path, PathBuf};
 
@@ -353,4 +353,27 @@ pub fn write_report(name: &str, value: &serde_json::Value) {
         serde_json::to_string_pretty(value).expect("report json"),
     )
     .expect("report write");
+}
+
+pub fn metric(name: &str, unit: &str, before: f64, after: f64, lower_is_better: bool) -> Metric {
+    Metric {
+        name: name.to_string(),
+        unit: unit.to_string(),
+        before,
+        after,
+        lower_is_better,
+    }
+}
+
+pub fn reference_metrics() -> Vec<Metric> {
+    vec![
+        metric("First Contentful Paint", "ms", 1136.0, 588.0, true),
+        metric("Largest Contentful Paint", "ms", 1136.0, 774.0, true),
+        metric("JavaScript bundle", "kB", 292.5, 297.2, true),
+        metric("Lighthouse score", "", 91.0, 91.0, false),
+    ]
+}
+
+pub fn reference_chart() -> Chart {
+    Chart::new(Some("Performance".to_string()), reference_metrics()).expect("reference chart")
 }

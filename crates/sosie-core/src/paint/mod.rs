@@ -105,6 +105,13 @@ pub fn rasterize_png(
     rasterize(fonts, list, dpr, limits).map(|p| encode_png(&p))
 }
 
+struct Region {
+    left: f32,
+    top: f32,
+    w: u32,
+    h: u32,
+}
+
 struct Renderer<'a> {
     pm: Pixmap,
     dpr: f32,
@@ -133,6 +140,15 @@ impl Renderer<'_> {
             Item::Fill { shape, color } => {
                 if let Some(p) = shapes::path(&scale_shape(shape, self.dpr)) {
                     self.fill(&p, *color, FillRule::Winding);
+                }
+            }
+            Item::ClippedFill { shape, clip, color } => {
+                let d = self.dpr;
+                if let (Some(p), Some(c)) = (
+                    shapes::path(&scale_shape(shape, d)),
+                    shapes::path(&scale_shape(clip, d)),
+                ) {
+                    self.clipped_fill(&p, &c, *color);
                 }
             }
             Item::Border {
@@ -217,28 +233,49 @@ impl Renderer<'_> {
         }
     }
 
-    fn fill(&mut self, path: &Path, color: Rgba, rule: FillRule) {
-        if color.a == 0 {
-            return;
-        }
+    fn region(&self, path: &Path) -> Option<Region> {
         let b = path.bounds();
         let visible = b.right() > 0.0
             && b.bottom() > 0.0
             && b.left() < self.pm.width as f32
             && b.top() < self.pm.height as f32;
         if !visible {
-            return;
+            return None;
         }
         let left = b.left().floor().max(0.0);
         let top = b.top().floor().max(0.0);
         let w = (b.right().ceil().min(self.pm.width as f32) - left).max(0.0) as u32;
         let h = (b.bottom().ceil().min(self.pm.height as f32) - top).max(0.0) as u32;
-        if w == 0 || h == 0 {
+        (w > 0 && h > 0).then_some(Region { left, top, w, h })
+    }
+
+    fn fill(&mut self, path: &Path, color: Rgba, rule: FillRule) {
+        if color.a == 0 {
             return;
         }
-        if let Some(cov) = coverage::mask_small(path, w, h, rule, left, top) {
-            self.blit(&cov, w, h, left as i64, top as i64, color, None);
+        let Some(r) = self.region(path) else {
+            return;
+        };
+        if let Some(cov) = coverage::mask_small(path, r.w, r.h, rule, r.left, r.top) {
+            self.blit(&cov, r.w, r.h, r.left as i64, r.top as i64, color, None);
         }
+    }
+
+    fn clipped_fill(&mut self, path: &Path, clip: &Path, color: Rgba) {
+        if color.a == 0 {
+            return;
+        }
+        let Some(r) = self.region(path) else {
+            return;
+        };
+        let mask = |p: &Path| coverage::mask_small(p, r.w, r.h, FillRule::Winding, r.left, r.top);
+        let (Some(mut cov), Some(clip)) = (mask(path), mask(clip)) else {
+            return;
+        };
+        for (a, b) in cov.iter_mut().zip(clip) {
+            *a = ((*a as u32 * b as u32 + 127) / 255) as u8;
+        }
+        self.blit(&cov, r.w, r.h, r.left as i64, r.top as i64, color, None);
     }
 
     fn glyphs(

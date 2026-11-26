@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod blink_ascii;
+pub mod chart;
 pub mod color;
 pub mod display;
 pub mod fonts;
@@ -11,6 +12,7 @@ mod script;
 mod shape;
 pub mod text;
 
+pub use chart::{Chart, ChartError, Metric, MetricError, Palette, Theme, Tone};
 pub use color::Rgba;
 pub use display::{DisplayList, GlyphPos, Item, Radii, Rect, Shape};
 pub use fonts::{FaceId, Family, FamilyList, FontError, Fonts, Pack};

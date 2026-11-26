@@ -1,4 +1,6 @@
 // Adapted from xeet (github.com/rauchg/xeet) at 095ba15, Apache-2.0; changes are listed in NOTICE.
+// collapse adapts InlineItemsBuilder from Chromium 141.0.7390.37, inline_items_builder.cc.
+// Copyright 2016 The Chromium Authors. BSD-3-Clause; the notice is in NOTICE.
 
 use crate::color::Rgba;
 use crate::display::{DisplayList, GlyphPos, Item};

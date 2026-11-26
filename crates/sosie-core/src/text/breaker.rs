@@ -1,3 +1,5 @@
+// Translated from Chromium 141.0.7390.37: line_breaker.cc and shaping_line_breaker.cc.
+// Copyright 2016 and 2017 The Chromium Authors. BSD-3-Clause; the notice is in NOTICE.
 use super::{ceil64, fits, Para, Pen, Remeasure, WhiteSpace, G};
 use crate::linebreak;
 use std::cell::RefCell;

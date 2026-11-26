@@ -1,4 +1,7 @@
 // Copied from xeet (github.com/rauchg/xeet) at 095ba15, Apache-2.0; changes are listed in NOTICE.
+// The table holds the ASCII pairs of LineBreakData::FillAscii in Chromium 141.0.7390.37,
+// character_property_data_generator.cc. Copyright 2016 The Chromium Authors.
+// BSD-3-Clause; the notice is in NOTICE.
 
 pub const FIRST: u8 = 0x21;
 pub const LAST: u8 = 0x7e;

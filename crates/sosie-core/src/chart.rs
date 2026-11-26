@@ -256,7 +256,7 @@ pub fn tone(change: f64, lower_is_better: bool) -> Tone {
 }
 
 pub fn format_value(value: f64, unit: &str) -> String {
-    let rounded = round_half_up(&value.abs().to_string(), 2);
+    let rounded = round_half_up(&js_decimal(value.abs()), 2);
     let (int, frac) = rounded.split_once('.').unwrap_or((&rounded, ""));
     let mut out = String::new();
     if value < 0.0 {
@@ -301,6 +301,31 @@ pub fn format_change(change: f64) -> String {
     }
     let sign = if change < 0.0 { MINUS } else { '+' };
     format!("{sign}{} %", change.abs())
+}
+
+fn js_decimal(x: f64) -> String {
+    let shortest = format!("{x:e}");
+    let (mantissa, _) = shortest.split_once('e').expect("{:e} prints an exponent");
+    let places = mantissa.len().saturating_sub(2);
+    let nearest = format!("{x:.places$e}");
+    let (mantissa, exponent) = nearest.split_once('e').expect("{:e} prints an exponent");
+    let digits: String = mantissa.chars().filter(|&c| c != '.').collect();
+    let exponent: i32 = exponent.parse().expect("{:e} prints an integer exponent");
+    let point = exponent + 1;
+    match usize::try_from(point) {
+        Ok(point) if point >= digits.len() => {
+            format!("{digits}{}", "0".repeat(point - digits.len()))
+        }
+        Ok(point) if point > 0 => format!("{}.{}", &digits[..point], &digits[point..]),
+        _ => format!("0.{}{digits}", "0".repeat(point.unsigned_abs() as usize)),
+    }
+}
+
+fn collapse_white_space(text: &str) -> String {
+    text.split([' ', '\t', '\n', '\r'])
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn round_half_up(decimal: &str, places: usize) -> String {
@@ -451,7 +476,7 @@ impl Row {
         let max = metric.before.abs().max(metric.after.abs());
         let bar = |value: f64, color: Rgba, label: &str, font: Font, text_color: Rgba| {
             let key = set.set(label, SMALL, palette.fg_muted, WhiteSpace::Pre, VALUE_WIDTH);
-            let text = format_value(value, &metric.unit);
+            let text = collapse_white_space(&format_value(value, &metric.unit));
             let value_text = set.set(&text, font, text_color, WhiteSpace::Pre, VALUE_WIDTH);
             if advance(&key) + advance(&value_text) > VALUE_WIDTH {
                 return Err(MetricError::ValueTooWide);

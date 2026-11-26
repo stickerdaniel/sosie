@@ -421,17 +421,21 @@ fn unit_at(width: f32) -> String {
 #[test]
 fn the_value_column_holds_exactly_144_px() {
     let draw_unit = |unit: &str| draw(&chart(None, vec![metric("Size", unit, 1.0, 7.0, true)]), W);
+    let padded = |unit: &str| format!(" \t{unit}\n ");
     let fits = unit_at(144.0);
     assert!(draw_unit(&fits).is_ok(), "{fits}");
+    assert_eq!(draw_unit(&padded(&fits)), draw_unit(&fits), "{fits}");
     let over = unit_at(144.0 + 1.0 / 64.0);
-    assert_eq!(
-        draw_unit(&over),
-        Err(ChartError::Metric {
-            index: 0,
-            error: MetricError::ValueTooWide
-        }),
-        "{over}"
-    );
+    for unit in [over.clone(), padded(&over)] {
+        assert_eq!(
+            draw_unit(&unit),
+            Err(ChartError::Metric {
+                index: 0,
+                error: MetricError::ValueTooWide
+            }),
+            "{unit:?}"
+        );
+    }
 }
 
 fn raster(chart: &Chart, theme: Theme) -> Pixmap {
@@ -588,4 +592,19 @@ fn a_clipped_fill_paints_only_inside_its_clip() {
         }]),
         paint(vec![Item::Fill { shape, color }])
     );
+}
+
+#[test]
+fn value_white_space_collapses_onto_one_line() {
+    let draw_unit = |unit: &str| {
+        draw(
+            &chart(None, vec![metric("Size", unit, 10.0, 11.0, true)]),
+            W,
+        )
+    };
+    let single = draw_unit("m s");
+    for unit in ["m\ns", "m  s", "m\ts", " m s ", "\r\nm \t\n s\n"] {
+        assert_eq!(draw_unit(unit), single, "{unit:?}");
+    }
+    assert_eq!(draw_unit(" \t\n"), draw_unit(""));
 }

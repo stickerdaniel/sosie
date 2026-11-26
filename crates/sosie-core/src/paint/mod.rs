@@ -10,7 +10,7 @@ use crate::color::Rgba;
 use crate::display::{DisplayList, GlyphPos, Item, Radii, Rect, Shape};
 use crate::fonts::{FaceId, Fonts};
 use crate::limits::{LimitError, Limits};
-pub use encode::encode_png;
+pub use encode::{encode, encode_png, EncodeError, Format, WEBP_MAX_SIDE};
 use std::fmt;
 use tiny_skia::{FillRule, Path, PathBuilder};
 

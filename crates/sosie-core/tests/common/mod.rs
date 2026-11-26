@@ -3,7 +3,8 @@
 use serde::Deserialize;
 use sosie_core::{
     layout, Chart, Direction, DisplayList, FamilyList, Fonts, Inline, InlineBackground, Item,
-    Metric, OverflowWrap, Paragraph, Radii, Rect, Rgba, Shape, TextLayout, TextStyle, WhiteSpace,
+    Metric, OverflowWrap, Paragraph, Pixmap, Radii, Rect, Rgba, Shape, TextLayout, TextStyle,
+    WhiteSpace,
 };
 use std::path::{Path, PathBuf};
 
@@ -314,6 +315,35 @@ pub fn decode_png(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
         t => panic!("unsupported png color type {t:?}"),
     };
     (info.width, info.height, px)
+}
+
+pub fn decode_webp(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
+    let mut dec = webp::WebPDecoder::new(std::io::Cursor::new(bytes)).expect("webp header");
+    let (w, h) = dec.dimensions();
+    let mut buf = vec![0; dec.output_buffer_size().expect("webp size")];
+    dec.read_image(&mut buf).expect("webp image");
+    let px = if dec.has_alpha() {
+        buf
+    } else {
+        buf.as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|p| [p[0], p[1], p[2], 255])
+            .collect()
+    };
+    (w, h, px)
+}
+
+pub fn pixmap(width: u32, height: u32, f: impl Fn(u32, u32) -> [u8; 4]) -> Pixmap {
+    let rgba = (0..height)
+        .flat_map(|y| (0..width).map(move |x| (x, y)))
+        .flat_map(|(x, y)| f(x, y))
+        .collect();
+    Pixmap {
+        width,
+        height,
+        rgba,
+    }
 }
 
 pub fn diff_ratio(a: &[u8], e: &[u8], w: u32, h: u32, tol: u8, slack: i32) -> (f64, u64) {

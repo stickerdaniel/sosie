@@ -16,6 +16,7 @@ unicode-bidi = "0.3"
 tiny-skia = { version = "0.11", default-features = false, features = ["std"] }
 png = "0.18"
 sha2 = "0.10"
+webp = { package = "image-webp", git = "https://github.com/marcbachmann/image-webp", rev = "f99a7c20abce962bfcc7950792fe27e1d1a9b6bc" }
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }

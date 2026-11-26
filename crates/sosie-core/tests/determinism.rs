@@ -1,9 +1,9 @@
 mod common;
 
-use common::{all_fonts, decode_png, hex, json, reference_chart, SANS};
+use common::{all_fonts, decode_png, decode_webp, hex, json, pixmap, reference_chart, SANS};
 use sha2::{Digest, Sha256};
 use sosie_core::{
-    chart, encode_png, layout, rasterize, Direction, DisplayList, FamilyList, Fonts, Inline,
+    chart, encode, layout, rasterize, Direction, DisplayList, FamilyList, Fonts, Format, Inline,
     OverflowWrap, Paragraph, Pixmap, TextStyle, Theme, WhiteSpace,
 };
 use std::collections::BTreeMap;
@@ -67,32 +67,84 @@ fn cases(fonts: &Fonts) -> Vec<(String, Pixmap)> {
     let charts = [("chart-light", Theme::Light), ("chart-dark", Theme::Dark)]
         .into_iter()
         .map(|(name, theme)| (name.to_string(), render_chart(fonts, theme)));
-    text.chain(charts).collect()
+    let synthetic = synthetic()
+        .into_iter()
+        .map(|(name, pixmap)| (name.to_string(), pixmap));
+    text.chain(charts).chain(synthetic).collect()
+}
+
+fn synthetic() -> [(&'static str, Pixmap); 3] {
+    [
+        (
+            "gradient-333x77",
+            pixmap(333, 77, |x, y| {
+                [
+                    (x * 255 / 332) as u8,
+                    (y * 255 / 76) as u8,
+                    ((x + y) % 256) as u8,
+                    255,
+                ]
+            }),
+        ),
+        (
+            "transparent-64x48",
+            pixmap(64, 48, |x, y| {
+                let a = if x < 32 { 0 } else { (x * 8 - 256) as u8 };
+                [(x * 4) as u8, (y * 5) as u8, 200, a]
+            }),
+        ),
+        (
+            "flat-400x200",
+            pixmap(400, 200, |x, y| {
+                if y < 4 {
+                    [x as u8, (x >> 8) as u8 * 50 + y as u8, 7, 255]
+                } else {
+                    [9, 105, 218, 255]
+                }
+            }),
+        ),
+    ]
+}
+
+fn encoded(fonts: &Fonts) -> Vec<(String, Format, Pixmap, Vec<u8>)> {
+    cases(fonts)
+        .into_iter()
+        .flat_map(|(name, pixmap)| {
+            [Format::Png, Format::Webp].map(|format| {
+                let bytes = encode(&pixmap, format).unwrap_or_else(|e| panic!("{name}: {e}"));
+                let key = format!("{name}.{}", format.extension());
+                (key, format, pixmap.clone(), bytes)
+            })
+        })
+        .collect()
 }
 
 #[test]
-fn png_bytes_are_identical_on_every_platform() {
+fn encoded_bytes_are_identical_on_every_platform() {
     let fonts = all_fonts();
     let expected: BTreeMap<String, String> = json("crates/sosie-core/tests/determinism.json");
-    let actual: BTreeMap<String, String> = cases(&fonts)
+    let actual: BTreeMap<String, String> = encoded(&fonts)
         .into_iter()
-        .map(|(name, pixmap)| (name, format!("{:x}", Sha256::digest(encode_png(&pixmap)))))
+        .map(|(key, _, _, bytes)| (key, format!("{:x}", Sha256::digest(bytes))))
         .collect();
     assert_eq!(
         actual,
         expected,
-        "PNG SHA-256 per case on {}-{}",
+        "SHA-256 per case and format on {}-{}",
         std::env::consts::OS,
         std::env::consts::ARCH
     );
 }
 
 #[test]
-fn png_decodes_to_the_rasterized_pixels() {
+fn encoded_images_decode_to_the_pixmap() {
     let fonts = all_fonts();
-    for (name, pixmap) in cases(&fonts) {
-        let (w, h, rgba) = decode_png(&encode_png(&pixmap));
-        assert_eq!((w, h), (pixmap.width, pixmap.height), "{name}: size");
-        assert!(rgba == pixmap.rgba, "{name}: decoded pixels differ");
+    for (key, format, pixmap, bytes) in encoded(&fonts) {
+        let (w, h, rgba) = match format {
+            Format::Png => decode_png(&bytes),
+            Format::Webp => decode_webp(&bytes),
+        };
+        assert_eq!((w, h), (pixmap.width, pixmap.height), "{key}: size");
+        assert!(rgba == pixmap.rgba, "{key}: decoded pixels differ");
     }
 }

@@ -1,7 +1,7 @@
 // Translated from Chromium 141.0.7390.37: line_breaker.cc and shaping_line_breaker.cc.
 // Copyright 2016 and 2017 The Chromium Authors. BSD-3-Clause; the notice is in NOTICE.
 use super::{ceil64, fits, Para, Pen, Remeasure, WhiteSpace, G};
-use crate::linebreak;
+use crate::{linebreak, work};
 use std::cell::RefCell;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -63,10 +63,12 @@ struct Shaped {
 }
 
 fn sp(g: &G) -> bool {
+    work::tick(1);
     g.space || g.tab || g.nl
 }
 
 fn bsp(g: &G) -> bool {
+    work::tick(1);
     g.space || g.tab
 }
 
@@ -374,6 +376,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
     }
 
     fn breakable(&self, k: usize) -> bool {
+        work::tick(1);
         let g = &self.p.g;
         if k <= self.ls {
             return false;
@@ -863,6 +866,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
             return Some(it.span);
         }
         for r in self.res[..idx].iter().rev() {
+            work::tick(1);
             let it = self.items[r.item];
             match it.kind {
                 Kind::Text | Kind::Open => return Some(it.span),

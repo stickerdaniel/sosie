@@ -10,6 +10,11 @@ pub mod paint;
 mod script;
 mod shape;
 pub mod text;
+#[cfg(feature = "count-work")]
+#[doc(hidden)]
+pub mod work;
+#[cfg(not(feature = "count-work"))]
+mod work;
 
 pub use color::Rgba;
 pub use display::{DisplayList, GlyphPos, Item, Radii, Rect, Shape};

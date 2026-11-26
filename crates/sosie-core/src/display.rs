@@ -63,6 +63,10 @@ pub enum Item {
         width: f32,
         color: Rgba,
     },
+    Polygons {
+        polygons: Vec<Vec<[f32; 2]>>,
+        color: Rgba,
+    },
     Hatch {
         shape: Shape,
         clip: Shape,

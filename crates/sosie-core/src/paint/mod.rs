@@ -162,6 +162,11 @@ impl Renderer<'_> {
                 width,
                 color,
             } => self.border(shape, Some(clip), *width, *color),
+            Item::Polygons { polygons, color } => {
+                if let Some(p) = shapes::polygons(polygons, self.dpr) {
+                    self.fill(&p, *color, FillRule::Winding);
+                }
+            }
             Item::Hatch {
                 shape,
                 clip,

@@ -1,14 +1,14 @@
 mod common;
 
-use common::{hex, json, metric, reference_chart, reference_metrics, SANS};
+use common::{all_fonts, hex, json, metric, reference_chart, reference_metrics, SANS};
 use serde::Deserialize;
 use sosie_core::chart::{
     format_change, format_value, percent_change, render, tone, FONT_STACK, PRIMER,
 };
 use sosie_core::{
-    layout, rasterize, Chart, ChartError, Direction, DisplayList, FamilyList, Fonts, Inline, Item,
-    LimitError, MetricError, OverflowWrap, Palette, Paragraph, Pixmap, Radii, Rect, Rendered, Rgba,
-    Shape, TextStyle, Theme, Tone, WhiteSpace, WrappedName,
+    layout, rasterize, Chart, ChartError, Direction, DisplayList, Family, FamilyList, Fonts,
+    Inline, Item, LimitError, MetricError, OverflowWrap, Palette, Paragraph, Pixmap, Radii, Rect,
+    Rendered, Rgba, Shape, TextStyle, Theme, Tone, WhiteSpace, WrappedName,
 };
 use std::collections::BTreeMap;
 
@@ -194,6 +194,12 @@ fn measure(text: &str, size: f32, weight: u16, white_space: WhiteSpace, width: f
 
 fn unwrapped(text: &str, size: f32, weight: u16) -> f32 {
     measure(text, size, weight, WhiteSpace::Pre, 1e4)[0]
+}
+
+const ARROW_ADVANCE: f32 = 5.0 + 8.75 + 5.0;
+
+fn before_and_arrow(before: &str) -> f32 {
+    unwrapped(before, 12.0, 400) + ARROW_ADVANCE
 }
 
 fn name_lines(name: &str) -> usize {
@@ -437,10 +443,10 @@ fn the_columns_sit_where_the_css_grid_puts_them() {
     let list = list(&reference_chart());
     let runs = glyph_runs(&list);
     let rows = [
-        ("−48 %", "1,136 → ", "588 ms"),
-        ("−32 %", "1,136 → ", "774 ms"),
-        ("+1.6 %", "292.5 → ", "297.2 kB"),
-        ("0 %", "91 → ", "91"),
+        ("−48 %", "1,136", "588 ms"),
+        ("−32 %", "1,136", "774 ms"),
+        ("+1.6 %", "292.5", "297.2 kB"),
+        ("0 %", "91", "91"),
     ];
     for (change, before, after) in rows {
         assert!(unwrapped(change, 14.0, 600) < 64.0, "{change}");
@@ -453,12 +459,107 @@ fn the_columns_sit_where_the_css_grid_puts_them() {
             runs.iter().any(|&(x, b)| x == 17.0 && b == baseline),
             "{change} is off the name baseline"
         );
-        let values_x = 717.0 - unwrapped(before, 12.0, 400) - unwrapped(after, 12.0, 600);
+        let values_x = 717.0 - before_and_arrow(before) - unwrapped(after, 12.0, 600);
         assert!(
             runs.iter().any(|(x, _)| (x - values_x).abs() < 1e-3),
             "{before}{after} does not end at 717"
         );
     }
+}
+
+fn arrow(left: f64, middle: f64) -> Vec<Vec<[f64; 2]>> {
+    let (length, thickness, head) = (8.75, 0.95, 3.35);
+    let miter = thickness * std::f64::consts::SQRT_2;
+    let (tip, half) = (left + length, thickness / 2.0);
+    let (notch, arm) = (tip - miter, tip - head);
+    vec![
+        vec![
+            [left, middle - half],
+            [notch, middle - half],
+            [notch, middle + half],
+            [left, middle + half],
+        ],
+        vec![
+            [arm - miter, middle - head],
+            [arm, middle - head],
+            [tip, middle],
+            [notch, middle],
+        ],
+        vec![
+            [notch, middle],
+            [tip, middle],
+            [arm, middle + head],
+            [arm - miter, middle + head],
+        ],
+    ]
+}
+
+#[test]
+fn the_arrow_is_a_drawn_chevron_between_before_and_after() {
+    let list = list(&reference_chart());
+    let runs = glyph_runs(&list);
+    let arrows: Vec<(&Vec<Vec<[f32; 2]>>, Rgba)> = list
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Polygons { polygons, color } => Some((polygons, *color)),
+            _ => None,
+        })
+        .collect();
+    let rows = [
+        ("1,136", "588 ms"),
+        ("1,136", "774 ms"),
+        ("292.5", "297.2 kB"),
+        ("91", "91"),
+    ];
+    assert_eq!(arrows.len(), rows.len());
+    let tracks = tracks(&list);
+    for (((polygons, color), (before, after)), track) in arrows.into_iter().zip(rows).zip(tracks) {
+        assert_eq!(color, hex("#59636e"));
+        let values_x = 717.0 - before_and_arrow(before) - unwrapped(after, 12.0, 600);
+        let &(_, baseline) = runs
+            .iter()
+            .find(|(x, b)| (x - values_x).abs() < 1e-3 && (b - track.y).abs() < 20.0)
+            .unwrap_or_else(|| panic!("no value run for {before}"));
+        let left = values_x + unwrapped(before, 12.0, 400) + 5.0;
+        let want = arrow(f64::from(left), f64::from(baseline) - 4.25);
+        assert_eq!(polygons.len(), want.len());
+        for (got, want) in polygons.iter().zip(&want) {
+            assert_eq!(got.len(), want.len());
+            for (g, w) in got.iter().zip(want) {
+                assert!(
+                    (f64::from(g[0]) - w[0]).abs() < 1e-3 && (f64::from(g[1]) - w[1]).abs() < 1e-3,
+                    "{before}: {g:?} vs {w:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn value_glyphs_come_from_noto_sans_even_with_every_pack_loaded() {
+    let fonts = all_fonts();
+    let list = render(&fonts, &reference_chart(), Theme::Light, W)
+        .unwrap_or_else(|e| panic!("{e}"))
+        .list;
+    let values_x = [
+        ("1,136", "588 ms"),
+        ("1,136", "774 ms"),
+        ("292.5", "297.2 kB"),
+        ("91", "91"),
+    ]
+    .map(|(before, after)| 717.0 - before_and_arrow(before) - unwrapped(after, 12.0, 600));
+    let mut runs = 0;
+    for item in &list.items {
+        if let Item::Glyphs { face, x, .. } = item {
+            if values_x.iter().any(|v| (v - x).abs() < 1e-3) {
+                let family = fonts.face(*face).map(|f| f.family());
+                assert_eq!(family, Some(Family::NotoSans), "value run at {x}");
+                runs += 1;
+            }
+        }
+    }
+    assert_eq!(runs, 8);
 }
 
 #[test]
@@ -513,14 +614,14 @@ fn a_wrapped_name_grows_its_row_and_centers_the_other_cells() {
         .expect("the change run");
     assert_eq!(change_baseline - first_name_baseline, 10.5);
     let values_baseline = |before: &str, after: &str, top: f32| {
-        let x = 717.0 - unwrapped(before, 12.0, 400) - unwrapped(after, 12.0, 600);
+        let x = 717.0 - before_and_arrow(before) - unwrapped(after, 12.0, 600);
         runs.iter()
             .find(|&&(rx, b)| (rx - x).abs() < 1e-3 && b > top && b < top + 60.0)
             .map(|&(_, b)| b - top)
             .unwrap_or_else(|| panic!("no value run for {after} below {top}"))
     };
     assert_eq!(
-        values_baseline("1,136 → ", "588 ms", 47.0) - values_baseline("1,136 → ", "774 ms", 110.0),
+        values_baseline("1,136", "588 ms", 47.0) - values_baseline("1,136", "774 ms", 110.0),
         10.5
     );
 }
@@ -607,7 +708,7 @@ fn the_widest_change_sets_the_change_column() {
     assert!((tracks(&list)[0].w - track).abs() < 1e-3);
     let runs = glyph_runs(&list);
     let values_end = 797.0 - wide - 16.0;
-    let values_x = values_end - unwrapped("1,136 → ", 12.0, 400) - unwrapped("588 ms", 12.0, 600);
+    let values_x = values_end - before_and_arrow("1,136") - unwrapped("588 ms", 12.0, 600);
     assert!(runs.iter().any(|(x, _)| (x - values_x).abs() < 1e-3));
     assert_eq!(
         draw(&chart(None, metrics), 646),
@@ -646,14 +747,14 @@ fn a_chart_beyond_the_dpr_2_limits_is_rejected_before_rasterizing() {
 
 fn values_at(width: f32) -> (f64, String) {
     let befores = [
-        (1.0, "1 → "),
-        (1.5, "1.5 → "),
-        (1000.0, "1,000 → "),
-        (-1.0, "−1 → "),
-        (1.25, "1.25 → "),
-        (-1.5, "−1.5 → "),
+        (1.0, "1"),
+        (1.5, "1.5"),
+        (1000.0, "1,000"),
+        (-1.0, "−1"),
+        (1.25, "1.25"),
+        (-1.5, "−1.5"),
     ]
-    .map(|(value, text)| (value, unwrapped(text, 12.0, 400)));
+    .map(|(value, text)| (value, before_and_arrow(text)));
     let after = |unit: &str| unwrapped(&format!("7 {unit}"), 12.0, 600);
     let letters: Vec<char> = ('a'..='z').collect();
     for len in 0..30 {

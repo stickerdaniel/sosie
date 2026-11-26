@@ -62,6 +62,7 @@ This file states what the core guarantees, how each guarantee is checked, and th
 - Blending: `(s*a + d*(255 - a) + 127) / 255` per channel. The page background must be opaque.
 - Clipped fills: the fill's mask and the clip's mask cover the fill's device bounds, and each pixel takes `(a*b + 127) / 255` of both.
 - Clipped borders: the border ring's mask, even-odd, times the clip's mask, as for clipped fills.
+- Polygons: the polygons of one item fill as one path with the non-zero rule, so overlapping polygons blend once.
 - Hatches: a clipped fill that paints only the 135° stripes of a CSS `repeating-linear-gradient(135deg, color 0 stripe, transparent stripe period)`. A device pixel paints when `((x + 0.5 - x0) + (y + 0.5 - y0)) / dpr * √2/2` modulo `period` is below `stripe`, with (x0, y0) the shape's device top-left corner. Stripe edges get no antialiasing, as in Chromium.
 - Inline code backgrounds: device rows from `ceil(base - ascent - padding)` to `floor(base + descent + padding)`, horizontal edges rounded.
 
@@ -71,7 +72,7 @@ This file states what the core guarantees, how each guarantee is checked, and th
 
 ## Chart
 
-`chart::render` draws one bar per metric from a `Chart` at a whole CSS width W and returns the display list with the indices and line counts of wrapped names. The reference uses W = 814 px. Colors are the 12 `@primer/primitives` 11.10.0 tokens in `assets/primer-tokens.json`; `node tools/primer-tokens.mjs` refreshes the file from npm, and a test compares it with `Palette::LIGHT` and `Palette::DARK`. Text uses the primer system font stack, which resolves to Noto Sans. Noto Sans has no U+2192, so the arrow falls back to Noto Sans CJK when that pack is loaded and to Liberation Mono otherwise, as in `sosie chart`.
+`chart::render` draws one bar per metric from a `Chart` at a whole CSS width W and returns the display list with the indices and line counts of wrapped names. The reference uses W = 814 px. Colors are the 12 `@primer/primitives` 11.10.0 tokens in `assets/primer-tokens.json`; `node tools/primer-tokens.mjs` refreshes the file from npm, and a test compares it with `Palette::LIGHT` and `Palette::DARK`. Text uses the primer system font stack, which resolves to Noto Sans.
 
 - Box: a 1 px `borderColor-default` border with radius 6, on `bgColor-default`. Content starts 17 px inside each side.
 - Header, only for a non-empty title: 12 px padding above and below, 14/21 px text at weight 600 wrapped at W - 34, a `bgColor-muted` background with top radii 5, and a 1 px `borderColor-default` bottom border.
@@ -79,7 +80,8 @@ This file states what the core guarantees, how each guarantee is checked, and th
 - Name: 14/21 px at weight 600 in `fgColor-default`, wrapped at 250 px. A wrapped name makes its row taller, and `render` reports it.
 - Track: 10 px high, radius 6, which CSS fits to 5, in `bgColor-neutral-muted`, W - 482 px minus the change column wide. One scale spans the chart: the largest |before| or |after| of all metrics. Segments are rectangles clipped by the track's rounded rect.
 - Decrease, |after| < |before|: a solid tone fill from 0 to max(|after|, 0.5 % of the track), then the removed part from |after| to |before|: a hatch of 3 px tone fill at 45 % alpha and 3 px clear, a 1 px inset outline of the tone fill at 55 % alpha, and right radii 6. Increase: a solid `borderColor-emphasis` segment from 0 to |before|, then a solid tone fill from |before| to |after|. Equal magnitudes: one tone fill from 0 to max(|before|, 0.5 % of the track). The tone fill is `bgColor-success-emphasis`, `bgColor-danger-emphasis` or, at 0 %, `borderColor-emphasis`.
-- Value: 12/18 px, right-aligned in 150 px: `format_value(before, "")` and U+2192 in `fgColor-muted` at weight 400, then `format_value(after, unit)` in `fgColor-default` at weight 600.
+- Value: 12/18 px, right-aligned in 150 px: `format_value(before, "")` in `fgColor-muted` at weight 400, a drawn arrow, then `format_value(after, unit)` in `fgColor-default` at weight 600. The arrow's 18.75 px advance counts toward the 150 px.
+- Arrow: an inline box 18.75 px wide with 5 px on each side of the ink. The ink is 8.75 px long in `fgColor-muted`, filled as three quads: a shaft 0.95 px thick and two arms at 45° whose outer edges run 3.35 px back and 3.35 px up or down from the tip. Each arm is 0.95 px thick, so its horizontal width is 0.95 × √2 px. The shaft's center lies 4.25 px above the baseline. The numbers come from U+2192 in the 12 px system font of the design mock at dpr 2: ink 8.42 px to the blunt tip and 8.68 px to the miter point, stroke 0.96 px, arms reaching 3.37 px above and 3.35 px below the center, center 4.23 px above the baseline, and 5 px of ink gap on each side.
 - Change: 14/21 px at weight 600 in the tone's text color, right-aligned and ending at W - 17. The column is as wide as the widest change of the chart and at least 64 px.
 - Width: W from 646 to 4096 CSS px. 646 = 34 + 250 + 150 + 64 + 3 × 16 + 100 leaves a 100 px track beside a 64 px change column.
 - Height: 1 + header + rows + separators + 1, with each row 20 + its content height. A one-line row is 41 px. The reference input of four metrics with a title is 814 by 215 CSS px.

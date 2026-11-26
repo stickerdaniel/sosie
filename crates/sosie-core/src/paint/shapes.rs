@@ -47,6 +47,20 @@ pub(crate) fn scale_rect(r: Rect, dpr: f32) -> Rect {
     }
 }
 
+pub(crate) fn polygons(polygons: &[Vec<[f32; 2]>], dpr: f32) -> Option<Path> {
+    let mut p = PathBuilder::new();
+    for points in polygons.iter().filter(|points| points.len() >= 3) {
+        let mut device = points.iter().map(|&[x, y]| (x * dpr, y * dpr));
+        let (x, y) = device.next()?;
+        p.move_to(x, y);
+        for (x, y) in device {
+            p.line_to(x, y);
+        }
+        p.close();
+    }
+    p.finish()
+}
+
 pub(crate) fn rect_path(r: Rect) -> Option<Path> {
     SkRect::from_xywh(r.x, r.y, r.w, r.h).map(PathBuilder::from_rect)
 }

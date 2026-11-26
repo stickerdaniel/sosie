@@ -3,7 +3,8 @@ use crate::display::{DisplayList, Item, Radii, Rect, Shape};
 use crate::fonts::{FamilyList, Fonts};
 use crate::limits::{LimitError, Limits};
 use crate::text::{
-    layout, Direction, Inline, OverflowWrap, Paragraph, TextLayout, TextStyle, WhiteSpace,
+    layout, Direction, Inline, InlineBox, OverflowWrap, Paragraph, TextLayout, TextStyle,
+    WhiteSpace,
 };
 use std::fmt;
 
@@ -15,7 +16,6 @@ const MAX_WIDTH: u32 = 4096;
 const CHECKED_DPR: f32 = 2.0;
 const MAX_CHANGE: f64 = 1e21;
 const MINUS: char = '\u{2212}';
-const ARROW: char = '\u{2192}';
 const BORDER: f32 = 1.0;
 const RADIUS: f32 = 6.0;
 const PADDING_X: f32 = 16.0;
@@ -34,6 +34,12 @@ const STRIPE_PERIOD: f32 = 6.0;
 const STRIPE_ALPHA_PERCENT: u32 = 45;
 const OUTLINE_ALPHA_PERCENT: u32 = 55;
 const FIT_TOLERANCE: f32 = 1.0 / 64.0;
+const ARROW_GAP: f32 = 5.0;
+const ARROW_LENGTH: f32 = 8.75;
+const ARROW_THICKNESS: f32 = 0.95;
+const ARROW_MITER: f32 = ARROW_THICKNESS * std::f32::consts::SQRT_2;
+const ARROW_HEAD: f32 = 3.35;
+const ARROW_RAISE: f32 = 4.25;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Metric {
@@ -407,28 +413,15 @@ impl Typesetter<'_> {
         }
     }
 
-    fn set_runs(
-        &self,
-        runs: &[(&str, Font, Rgba)],
-        white_space: WhiteSpace,
-        width: f32,
-    ) -> TextLayout {
-        let inlines: Vec<Inline> = runs
-            .iter()
-            .map(|&(text, font, color)| Inline::Text {
-                text: text.to_string(),
-                style: self.style(font, color, white_space),
-            })
-            .collect();
-        let (_, font, color) = runs[0];
+    fn lay(&self, strut: TextStyle, inlines: &[Inline], width: f32) -> TextLayout {
         let para = Paragraph {
             width,
-            strut: self.style(font, color, white_space),
+            strut,
             overflow_wrap: OverflowWrap::Normal,
             direction: Direction::Ltr,
             dpr: CHECKED_DPR,
         };
-        layout(self.fonts, &para, &inlines).expect("chart font sizes lie within the layout limits")
+        layout(self.fonts, &para, inlines).expect("chart font sizes lie within the layout limits")
     }
 
     fn set(
@@ -439,7 +432,12 @@ impl Typesetter<'_> {
         white_space: WhiteSpace,
         width: f32,
     ) -> TextLayout {
-        self.set_runs(&[(text, font, color)], white_space, width)
+        let style = self.style(font, color, white_space);
+        let inline = Inline::Text {
+            text: text.to_string(),
+            style: style.clone(),
+        };
+        self.lay(style, &[inline], width)
     }
 }
 
@@ -449,6 +447,34 @@ fn advance(text: &TextLayout) -> f32 {
 
 fn overflows(text: &TextLayout, room: f32) -> bool {
     text.lines.iter().any(|l| l.advance > room + FIT_TOLERANCE)
+}
+
+fn arrow(left: f32, middle: f32) -> Vec<Vec<[f32; 2]>> {
+    let half = ARROW_THICKNESS / 2.0;
+    let tip = left + ARROW_LENGTH;
+    let notch = tip - ARROW_MITER;
+    let head = tip - ARROW_HEAD;
+    let (top, bottom) = (middle - ARROW_HEAD, middle + ARROW_HEAD);
+    vec![
+        vec![
+            [left, middle - half],
+            [notch, middle - half],
+            [notch, middle + half],
+            [left, middle + half],
+        ],
+        vec![
+            [head - ARROW_MITER, top],
+            [head, top],
+            [tip, middle],
+            [notch, middle],
+        ],
+        vec![
+            [notch, middle],
+            [tip, middle],
+            [head, bottom],
+            [head - ARROW_MITER, bottom],
+        ],
+    ]
 }
 
 fn with_alpha(color: Rgba, percent: u32) -> Rgba {
@@ -528,14 +554,23 @@ impl Row {
         if overflows(&name, NAME_WIDTH) {
             return Err(MetricError::NameTooWide);
         }
-        let before = format!("{} {ARROW} ", format_value(metric.before, ""));
-        let after = collapse_white_space(&format_value(metric.after, &metric.unit));
-        let values = set.set_runs(
+        let muted = set.style(SMALL, palette.fg_muted, WhiteSpace::Pre);
+        let values = set.lay(
+            muted.clone(),
             &[
-                (&before, SMALL, palette.fg_muted),
-                (&after, SMALL_BOLD, palette.fg_default),
+                Inline::Text {
+                    text: format_value(metric.before, ""),
+                    style: muted,
+                },
+                Inline::Box(InlineBox {
+                    width: 2.0 * ARROW_GAP + ARROW_LENGTH,
+                    height: ARROW_RAISE + ARROW_HEAD,
+                }),
+                Inline::Text {
+                    text: collapse_white_space(&format_value(metric.after, &metric.unit)),
+                    style: set.style(SMALL_BOLD, palette.fg_default, WhiteSpace::Pre),
+                },
             ],
-            WhiteSpace::Pre,
             VALUE_WIDTH,
         );
         if advance(&values) > VALUE_WIDTH {
@@ -625,11 +660,17 @@ impl Row {
                 }
             }
         }
-        self.values.paint(
-            list,
+        let (x, y) = (
             columns.values_end - advance(&self.values),
             centered(self.values.height),
         );
+        self.values.paint(list, x, y);
+        if let Some(b) = self.values.lines.iter().flat_map(|l| &l.boxes).next() {
+            list.push(Item::Polygons {
+                polygons: arrow(x + b.x + ARROW_GAP, y + b.y + b.height - ARROW_RAISE),
+                color: palette.fg_muted,
+            });
+        }
         self.change.paint(
             list,
             columns.right - advance(&self.change),

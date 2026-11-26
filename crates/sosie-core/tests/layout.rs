@@ -2074,10 +2074,22 @@ fn whitespace_before_a_forced_break_in_the_next_span_does_not_hang() {
     }
 }
 
-#[test]
-fn padding_tabs_and_collapsed_spans_break_like_chromium() {
-    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
-    let text = |white_space, t: &str, size, line_height, padding_x: Option<f32>| Inline::Text {
+type ChromiumRow = (
+    ((WhiteSpace, f32), OverflowWrap, Direction),
+    f32,
+    Vec<Inline>,
+    f32,
+    (&'static str, (f32, f32)),
+);
+
+fn padded(
+    white_space: WhiteSpace,
+    t: &str,
+    size: f32,
+    line_height: f32,
+    padding_x: Option<f32>,
+) -> Inline {
+    Inline::Text {
         text: t.to_string(),
         style: TextStyle {
             family: FamilyList::parse(MONO),
@@ -2092,8 +2104,79 @@ fn padding_tabs_and_collapsed_spans_break_like_chromium() {
             }),
             ..style(MONO, white_space)
         },
-    };
-    let inline_box = |width, height| Inline::Box(InlineBox { width, height });
+    }
+}
+
+fn inline_box(width: f32, height: f32) -> Inline {
+    Inline::Box(InlineBox { width, height })
+}
+
+fn assert_chromium_rows(rows: impl IntoIterator<Item = ChromiumRow>) {
+    use WhiteSpace::Pre as P;
+    for (((strut_ws, strut), overflow_wrap, direction), width, inlines, height, c) in rows {
+        let p = Paragraph {
+            width,
+            strut: TextStyle {
+                family: FamilyList::parse(MONO),
+                size: 10.0,
+                line_height: strut,
+                tab_size: 1,
+                ..style(MONO, strut_ws)
+            },
+            overflow_wrap,
+            direction,
+        };
+        let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+        let what = format!("{} inlines {direction:?} at width {width}", inlines.len());
+        assert_eq!(t.height, height, "{what}: height");
+        let (ch, at) = c;
+        if ch == "box" {
+            let last = t
+                .lines
+                .iter()
+                .flat_map(|l| &l.boxes)
+                .map(|b| (b.x, b.y))
+                .max_by(|p, q| p.1.total_cmp(&q.1))
+                .unwrap_or((f32::NAN, f32::NAN));
+            assert_at(&format!("{what}: last box"), last, at);
+            continue;
+        }
+        let mut list = DisplayList::new(100.0, 400.0, hex("#ffffff"));
+        t.paint(&mut list, 0.0, 0.0);
+        let (_, ids) = mono_run(
+            P,
+            OverflowWrap::Normal,
+            Direction::Ltr,
+            10.0,
+            &[(P, ch)],
+            100.0,
+        );
+        let last = list
+            .items
+            .iter()
+            .flat_map(|i| match i {
+                Item::Glyphs {
+                    x,
+                    baseline,
+                    glyphs,
+                    ..
+                } => glyphs
+                    .iter()
+                    .filter(|g| g.id == ids[0].0)
+                    .map(|g| (x + g.x, baseline + g.y))
+                    .collect(),
+                _ => Vec::new(),
+            })
+            .max_by(|p, q| p.1.total_cmp(&q.1))
+            .unwrap_or((f32::NAN, f32::NAN));
+        assert_at(&format!("{what}: last {ch}"), last, at);
+    }
+}
+
+#[test]
+fn padding_tabs_and_collapsed_spans_break_like_chromium() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
+    let (text, inline_box) = (padded, inline_box);
     let (any, ltr) = (OverflowWrap::Anywhere, Direction::Ltr);
     let rows = [
         (
@@ -2159,46 +2242,336 @@ fn padding_tabs_and_collapsed_spans_break_like_chromium() {
             ("a", (0.0, 58.0)),
         ),
     ];
-    for (((strut_ws, strut), overflow_wrap, direction), width, inlines, height, c) in rows {
-        let p = Paragraph {
-            width,
-            strut: TextStyle {
-                family: FamilyList::parse(MONO),
-                size: 10.0,
-                line_height: strut,
-                tab_size: 1,
-                ..style(MONO, strut_ws)
-            },
-            overflow_wrap,
-            direction,
-        };
-        let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
-        let what = format!("{} inlines {direction:?} at width {width}", inlines.len());
-        assert_eq!(t.height, height, "{what}: height");
-        let mut list = DisplayList::new(100.0, 400.0, hex("#ffffff"));
-        t.paint(&mut list, 0.0, 0.0);
-        let (ch, at) = c;
-        let (_, ids) = mono_run(P, OverflowWrap::Normal, ltr, 10.0, &[(P, ch)], 100.0);
-        let last = list
-            .items
-            .iter()
-            .flat_map(|i| match i {
-                Item::Glyphs {
-                    x,
-                    baseline,
-                    glyphs,
-                    ..
-                } => glyphs
-                    .iter()
-                    .filter(|g| g.id == ids[0].0)
-                    .map(|g| (x + g.x, baseline + g.y))
-                    .collect(),
-                _ => Vec::new(),
-            })
-            .max_by(|p, q| p.1.total_cmp(&q.1))
-            .unwrap_or((f32::NAN, f32::NAN));
-        assert_at(&format!("{what}: last {ch}"), last, at);
-    }
+    assert_chromium_rows(rows);
+}
+
+#[test]
+fn zero_width_space_segment_breaks_collapse_like_chromium() {
+    use WhiteSpace::Normal as N;
+    let text = padded;
+    assert_chromium_rows([
+        (
+            ((N, 16.0), OverflowWrap::Normal, Direction::Ltr),
+            400.0,
+            vec![text(N, "x\u{200b} \ny", 10.0, 16.0, None)],
+            16.0,
+            ("y", (6.0, 10.0)),
+        ),
+        (
+            ((N, 16.0), OverflowWrap::Normal, Direction::Ltr),
+            400.0,
+            vec![
+                text(N, "x\u{200b}", 10.0, 16.0, None),
+                text(N, " \ny", 10.0, 16.0, None),
+            ],
+            16.0,
+            ("y", (6.015625, 10.0)),
+        ),
+        (
+            ((N, 16.0), OverflowWrap::Normal, Direction::Ltr),
+            400.0,
+            vec![
+                text(N, "x\u{200b} ", 10.0, 16.0, None),
+                text(N, "\ny", 10.0, 16.0, None),
+            ],
+            16.0,
+            ("y", (6.015625, 10.0)),
+        ),
+        (
+            ((N, 16.0), OverflowWrap::Normal, Direction::Ltr),
+            400.0,
+            vec![
+                text(N, "x \n", 10.0, 16.0, None),
+                text(N, "\u{200b}y", 10.0, 16.0, None),
+            ],
+            16.0,
+            ("y", (6.015625, 10.0)),
+        ),
+        (
+            ((N, 16.0), OverflowWrap::Normal, Direction::Ltr),
+            400.0,
+            vec![
+                text(N, "x\u{200b} ", 10.0, 16.0, None),
+                text(N, "\n", 10.0, 16.0, None),
+                text(N, "\n", 10.0, 16.0, None),
+                text(N, "y", 10.0, 16.0, None),
+            ],
+            16.0,
+            ("y", (12.015625, 10.0)),
+        ),
+        (
+            ((N, 16.0), OverflowWrap::Normal, Direction::Ltr),
+            400.0,
+            vec![
+                text(N, "x\u{200b} ", 10.0, 16.0, None),
+                text(N, "\n", 10.0, 16.0, Some(6.0)),
+                text(N, "y", 10.0, 16.0, None),
+            ],
+            16.0,
+            ("y", (24.015625, 10.0)),
+        ),
+    ]);
+}
+
+#[test]
+fn padding_of_empty_and_trimmed_spans_follows_chromium() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
+    let (text, inline_box) = (padded, inline_box);
+    let any = OverflowWrap::Anywhere;
+    assert_chromium_rows([
+        (
+            ((P, 80.0), any, Direction::Ltr),
+            24.0,
+            vec![
+                text(N, " \n", 10.0, 16.0, Some(0.5)),
+                text(B, "c", 10.0, 16.0, None),
+            ],
+            80.0,
+            ("c", (1.0, 42.0)),
+        ),
+        (
+            ((N, 80.0), OverflowWrap::Normal, Direction::Rtl),
+            17.5,
+            vec![
+                text(N, "\n", 10.0, 16.0, Some(0.5)),
+                text(P, " a ", 10.0, 80.0, None),
+                text(W, "\nc", 10.0, 16.0, None),
+            ],
+            240.0,
+            ("a", (5.46875, 122.0)),
+        ),
+        (
+            ((N, 80.0), any, Direction::Rtl),
+            18.015625,
+            vec![
+                text(N, " ", 10.0, 16.0, Some(6.53125)),
+                text(N, " \r\n", 10.0, 16.0, Some(6.5)),
+                text(W, " c", 10.0, 16.0, None),
+            ],
+            160.0,
+            ("c", (5.984375, 122.0)),
+        ),
+        (
+            ((B, 16.0), OverflowWrap::Normal, Direction::Rtl),
+            12.25,
+            vec![
+                text(N, "\n", 10.0, 80.0, Some(6.53125)),
+                text(W, " a ", 10.0, 16.0, None),
+            ],
+            96.0,
+            ("a", (6.234375, 90.0)),
+        ),
+        (
+            ((P, 16.0), any, Direction::Rtl),
+            12.015625,
+            vec![text(W, "\na", 10.0, 16.0, Some(3.0))],
+            32.0,
+            ("a", (6.0, 26.0)),
+        ),
+        (
+            ((P, 16.0), any, Direction::Rtl),
+            25.0,
+            vec![
+                text(N, "  \n", 10.0, 16.0, Some(3.0)),
+                inline_box(6.0, 20.0),
+            ],
+            26.0,
+            ("box", (13.0, 0.0)),
+        ),
+        (
+            ((B, 80.0), OverflowWrap::Normal, Direction::Rtl),
+            5.5,
+            vec![
+                inline_box(1.0, 20.0),
+                text(W, "  x", 10.0, 16.0, Some(6.53125)),
+                text(N, "a ", 10.0, 16.0, Some(6.53125)),
+                text(B, "\na\na", 10.0, 80.0, None),
+                text(W, "\n\n", 10.0, 16.0, Some(3.0)),
+                text(P, "c", 10.0, 16.0, None),
+            ],
+            560.0,
+            ("x", (-19.59375, 202.0)),
+        ),
+        (
+            ((B, 16.0), any, Direction::Rtl),
+            18.0,
+            vec![
+                text(N, " ", 10.0, 80.0, Some(3.0)),
+                text(N, "c", 10.0, 16.0, None),
+            ],
+            80.0,
+            ("c", (11.984375, 42.0)),
+        ),
+    ]);
+}
+
+#[test]
+fn carriage_returns_and_removed_spaces_take_chromium_levels() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
+    let text = padded;
+    let any = OverflowWrap::Anywhere;
+    assert_chromium_rows([
+        (
+            ((W, 16.0), OverflowWrap::Normal, Direction::Rtl),
+            24.0,
+            vec![
+                text(B, "aa\r", 10.0, 16.0, None),
+                text(W, "c", 10.0, 16.0, None),
+            ],
+            16.0,
+            ("c", (17.984375, 10.0)),
+        ),
+        (
+            ((P, 16.0), OverflowWrap::Normal, Direction::Rtl),
+            13.0,
+            vec![
+                text(P, "a\n\r", 10.0, 16.0, Some(6.53125)),
+                text(P, "x", 10.0, 16.0, None),
+                text(P, " a\r\r", 10.0, 16.0, Some(6.5)),
+                text(W, " \n", 10.0, 16.0, None),
+                text(P, " c", 10.0, 16.0, None),
+            ],
+            48.0,
+            ("x", (-18.03125, 26.0)),
+        ),
+        (
+            ((B, 16.0), any, Direction::Rtl),
+            0.25,
+            vec![
+                text(N, "\r\u{200b}x", 10.0, 16.0, None),
+                text(P, "\raa\t ", 10.0, 16.0, Some(6.5)),
+                text(P, "\u{200b}\u{200b}", 10.0, 16.0, None),
+                text(N, "\raa\n", 10.0, 16.0, None),
+            ],
+            80.0,
+            ("x", (-5.765625, 26.0)),
+        ),
+        (
+            ((N, 16.0), OverflowWrap::Normal, Direction::Rtl),
+            40.0,
+            vec![
+                text(N, "\n", 10.0, 16.0, Some(3.0)),
+                text(W, "\u{200b}", 10.0, 16.0, None),
+                text(P, "ab", 10.0, 16.0, None),
+            ],
+            16.0,
+            ("b", (33.984375, 10.0)),
+        ),
+        (
+            ((N, 16.0), OverflowWrap::Normal, Direction::Rtl),
+            40.0,
+            vec![
+                text(W, "\u{200b}", 10.0, 16.0, Some(3.0)),
+                text(P, "ab", 10.0, 16.0, None),
+            ],
+            16.0,
+            ("b", (33.984375, 10.0)),
+        ),
+        (
+            ((P, 80.0), OverflowWrap::Normal, Direction::Rtl),
+            24.0,
+            vec![
+                text(B, "\n\r", 10.0, 16.0, Some(3.0)),
+                text(N, "\nc", 10.0, 16.0, None),
+            ],
+            160.0,
+            ("c", (17.984375, 122.0)),
+        ),
+        (
+            ((B, 16.0), OverflowWrap::Normal, Direction::Ltr),
+            12.25,
+            vec![
+                text(B, "\na", 10.0, 16.0, Some(6.53125)),
+                text(N, "\nc", 10.0, 16.0, None),
+            ],
+            48.0,
+            ("c", (0.0, 42.0)),
+        ),
+        (
+            ((N, 16.0), OverflowWrap::Normal, Direction::Rtl),
+            5.5,
+            vec![
+                text(B, "\ra\na", 10.0, 16.0, None),
+                text(N, " c", 10.0, 16.0, None),
+            ],
+            48.0,
+            ("c", (-0.515625, 42.0)),
+        ),
+        (
+            ((N, 16.0), any, Direction::Rtl),
+            6.015625,
+            vec![
+                text(P, " a ", 10.0, 16.0, None),
+                text(N, "\r\u{200b}", 10.0, 80.0, None),
+                inline_box(1.0, 20.0),
+                text(W, "a\u{200b} \n\n", 10.0, 80.0, None),
+                text(N, "c", 10.0, 16.0, None),
+            ],
+            272.0,
+            ("c", (0.0, 266.0)),
+        ),
+        (
+            ((W, 80.0), any, Direction::Rtl),
+            11.984375,
+            vec![
+                text(W, "\t", 10.0, 80.0, None),
+                text(B, " \n", 10.0, 16.0, None),
+                text(N, "\t", 10.0, 80.0, Some(6.53125)),
+                text(P, " c", 10.0, 16.0, None),
+            ],
+            240.0,
+            ("c", (-13.109375, 202.0)),
+        ),
+    ]);
+}
+
+#[test]
+fn lf_line_metrics_and_crlf_splits_follow_chromium() {
+    use WhiteSpace::{BreakSpaces as B, Normal as N, Pre as P, PreWrap as W};
+    let text = padded;
+    let any = OverflowWrap::Anywhere;
+    assert_chromium_rows([
+        (
+            ((N, 16.0), OverflowWrap::Normal, Direction::Ltr),
+            12.015625,
+            vec![
+                text(B, "\t\t\t \r", 10.0, 16.0, Some(6.5)),
+                text(P, "\nc", 10.0, 16.0, None),
+            ],
+            80.0,
+            ("c", (0.0, 74.0)),
+        ),
+        (
+            ((B, 80.0), any, Direction::Ltr),
+            6.25,
+            vec![
+                text(B, "  ", 10.0, 80.0, None),
+                text(P, "a\n\t\r", 10.0, 80.0, None),
+                text(W, "\n", 10.0, 16.0, Some(3.0)),
+                text(N, "c", 10.0, 16.0, None),
+            ],
+            400.0,
+            ("c", (0.0, 362.0)),
+        ),
+        (
+            ((W, 16.0), any, Direction::Ltr),
+            5.5,
+            vec![
+                text(P, "\r", 10.0, 16.0, Some(6.53125)),
+                text(W, "\n\t\t ", 10.0, 16.0, None),
+                text(B, "a  \t", 10.0, 16.0, None),
+            ],
+            96.0,
+            ("a", (0.0, 42.0)),
+        ),
+        (
+            ((P, 16.0), any, Direction::Rtl),
+            0.25,
+            vec![text(W, "\na", 10.0, 80.0, None)],
+            160.0,
+            ("a", (-5.765625, 122.0)),
+        ),
+    ]);
 }
 
 #[test]
@@ -2388,6 +2761,34 @@ fn many_preserved_newlines_lay_out_in_linear_time() {
         elapsed < std::time::Duration::from_secs(10),
         "800,000 newlines took {elapsed:?}"
     );
+}
+
+#[test]
+fn long_carriage_return_runs_scale_linearly() {
+    let fonts = shared_fonts();
+    let st = TextStyle {
+        family: FamilyList::parse(MONO),
+        size: 10.0,
+        line_height: 16.0,
+        ..style(MONO, WhiteSpace::Pre)
+    };
+    let p = Paragraph {
+        width: 100.0,
+        strut: st.clone(),
+        overflow_wrap: OverflowWrap::Normal,
+        direction: Direction::Rtl,
+    };
+    assert_scales_linearly("carriage returns", 20_000, |n| {
+        let inlines = [Inline::Text {
+            text: format!("a{}b", "\r".repeat(n)),
+            style: st.clone(),
+        }];
+        let start = std::time::Instant::now();
+        let t = layout(fonts, &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+        let elapsed = start.elapsed();
+        assert_eq!(t.lines.len(), 1);
+        elapsed
+    });
 }
 
 #[test]

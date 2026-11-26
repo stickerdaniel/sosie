@@ -168,6 +168,7 @@ impl TextLayout {
 }
 
 const OBJECT: char = '\u{fffc}';
+const ZWSP: char = '\u{200b}';
 const RESHAPES_PER_LINE: usize = 4;
 
 #[derive(Clone)]
@@ -232,6 +233,7 @@ struct G {
     atom: bool,
     pad_before: f32,
     pad_after: f32,
+    gap_before: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -304,40 +306,155 @@ fn resolve(fonts: &Fonts, s: &TextStyle) -> Style {
     }
 }
 
+#[derive(Clone, Copy)]
+enum End {
+    Start,
+    Kept,
+    Collapsible { newline: bool, space: bool },
+    Removed { newline: bool, span: usize },
+}
+
+struct Collapsed {
+    text: String,
+    span_of: Vec<usize>,
+}
+
+impl Collapsed {
+    fn push(&mut self, c: char, span: usize) {
+        self.text.push(c);
+        self.span_of.extend(std::iter::repeat_n(span, c.len_utf8()));
+    }
+
+    fn remove_space(&mut self, newline: bool) -> End {
+        self.text.pop();
+        let span = self.span_of.pop().unwrap_or_default();
+        End::Removed { newline, span }
+    }
+
+    fn restore(&mut self, last: End) -> End {
+        match last {
+            End::Removed { newline, span } => {
+                self.push(' ', span);
+                End::Collapsible {
+                    newline,
+                    space: true,
+                }
+            }
+            _ => last,
+        }
+    }
+
+    fn removes_newline(&self, before_space: bool, next: Option<char>) -> bool {
+        let mut rev = self.text.chars().rev();
+        if before_space {
+            rev.next();
+        }
+        rev.next() == Some(ZWSP) || next == Some(ZWSP)
+    }
+
+    fn normal(&mut self, t: &str, span: usize, last: End) -> End {
+        let cs: Vec<char> = t.chars().collect();
+        let run_end = |i: usize| i + cs[i..].iter().take_while(|&&c| is_collapsible(c)).count();
+        let mut end = last;
+        let mut i = 0;
+        if cs.first().is_some_and(|&c| is_collapsible(c)) {
+            let e = run_end(0);
+            let mut newline = cs[..e].contains(&'\n');
+            let next = cs.get(e).copied();
+            if let End::Collapsible {
+                newline: last_newline,
+                space: true,
+            } = last
+            {
+                if (newline || last_newline) && self.removes_newline(true, next) {
+                    end = self.remove_space(last_newline);
+                    newline = false;
+                }
+            }
+            let insert =
+                matches!(last, End::Kept) && !(newline && self.removes_newline(false, next));
+            if insert {
+                self.push(' ', span);
+                end = End::Collapsible {
+                    newline,
+                    space: true,
+                };
+            }
+            i = e;
+        } else if let (
+            Some(&c),
+            End::Collapsible {
+                newline: true,
+                space: true,
+            },
+        ) = (cs.first(), last)
+        {
+            if self.removes_newline(true, Some(c)) {
+                self.remove_space(true);
+            }
+        }
+        while i < cs.len() {
+            if !is_collapsible(cs[i]) {
+                self.push(cs[i], span);
+                end = End::Kept;
+                i += 1;
+                continue;
+            }
+            let e = run_end(i);
+            let newline = cs[i..e].contains(&'\n');
+            if newline && self.removes_newline(false, cs.get(e).copied()) {
+                end = End::Kept;
+            } else {
+                self.push(' ', span);
+                end = End::Collapsible {
+                    newline,
+                    space: true,
+                };
+            }
+            i = e;
+        }
+        end
+    }
+}
+
+fn is_collapsible(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '\r')
+}
+
 fn collapse(
     inlines: &[Inline],
     strut: &TextStyle,
     fonts: &Fonts,
 ) -> (String, Vec<usize>, Vec<Style>) {
-    let mut text = String::new();
-    let mut span_of = Vec::new();
+    let mut out = Collapsed {
+        text: String::new(),
+        span_of: Vec::new(),
+    };
     let mut styles = Vec::new();
-    let mut prev_collapsible_space = true;
+    let mut last = End::Start;
     for (i, inline) in inlines.iter().enumerate() {
+        let idx = styles.len();
         match inline {
             Inline::Text { text: t, style } => {
-                let idx = styles.len();
                 styles.push(resolve(fonts, style));
+                if t.is_empty() {
+                    continue;
+                }
+                last = out.restore(last);
+                if style.white_space == WhiteSpace::Normal {
+                    last = out.normal(t, idx, last);
+                    continue;
+                }
                 for c in t.chars() {
-                    let c = if style.white_space == WhiteSpace::Normal {
-                        if matches!(c, ' ' | '\t' | '\n' | '\r') {
-                            if prev_collapsible_space {
-                                continue;
-                            }
-                            prev_collapsible_space = true;
-                            ' '
-                        } else {
-                            prev_collapsible_space = false;
-                            c
+                    out.push(c, idx);
+                    last = if c == '\n' {
+                        End::Collapsible {
+                            newline: false,
+                            space: false,
                         }
                     } else {
-                        prev_collapsible_space = c == '\n';
-                        c
+                        End::Kept
                     };
-                    let mut buf = [0u8; 4];
-                    let s = c.encode_utf8(&mut buf);
-                    text.push_str(s);
-                    span_of.extend(std::iter::repeat_n(idx, s.len()));
                 }
             }
             Inline::Box(b) => {
@@ -345,14 +462,14 @@ fn collapse(
                 st.background = None;
                 st.pad = 0.0;
                 st.atom = Some((i, *b));
-                let idx = styles.len();
                 styles.push(st);
-                text.push(OBJECT);
-                span_of.extend(std::iter::repeat_n(idx, OBJECT.len_utf8()));
-                prev_collapsible_space = false;
+                out.restore(last);
+                out.push(OBJECT, idx);
+                last = End::Kept;
             }
         }
     }
+    let Collapsed { text, mut span_of } = out;
     span_of.push(styles.len().saturating_sub(1));
     (text, span_of, styles)
 }
@@ -372,9 +489,17 @@ impl<'a> Para<'a> {
         };
         let bidi = BidiInfo::new(&text, base);
         let rtl_base = bidi.paragraphs.first().is_some_and(|p| p.level.is_rtl());
-        let levels = line_levels(&bidi);
+        let mut levels = line_levels(&bidi);
+        boundary_neutral_levels(&bidi, &mut levels);
+        carriage_return_levels(&text, &span_of, &mut levels);
         let scripts = script::resolve(&text);
-        let gbs = linebreak::grapheme_boundaries(&text);
+        let mut gbs = linebreak::grapheme_boundaries(&text);
+        gbs.extend(
+            text.match_indices("\r\n")
+                .map(|(i, _)| i + 1)
+                .filter(|&i| span_of[i - 1] != span_of[i]),
+        );
+        gbs.sort_unstable();
         let mut g = Vec::new();
         for w in gbs.windows(2) {
             let (a, b) = (w[0], w[1]);
@@ -411,9 +536,18 @@ impl<'a> Para<'a> {
                 atom,
                 pad_before: if a == ss { st.pad } else { 0.0 },
                 pad_after: if b == se { st.pad } else { 0.0 },
+                gap_before: 0.0,
             });
         }
         let n = g.len();
+        for (span, st) in styles.iter().enumerate() {
+            if span_ranges[span].0 == usize::MAX && st.pad > 0.0 {
+                let k = g.partition_point(|x| x.span < span);
+                if let Some(next) = g.get_mut(k) {
+                    next.gap_before += 2.0 * st.pad;
+                }
+            }
+        }
         let mut item_break = vec![false; n];
         let mut shape_break = vec![false; n];
         for i in 1..n {
@@ -427,6 +561,7 @@ impl<'a> Para<'a> {
                 || p.script != q.script
                 || p.pad_after > 0.0
                 || q.pad_before > 0.0
+                || q.gap_before > 0.0
                 || styles[p.span].size != styles[q.span].size;
         }
         let strut_style = resolve(fonts, &para.strut);
@@ -648,6 +783,10 @@ impl<'a> Para<'a> {
             pen.item = 0.0;
         }
         let g = &self.g[k];
+        if g.gap_before > 0.0 {
+            pen.total += ceil64(pen.item) + g.gap_before;
+            pen.item = 0.0;
+        }
         if g.pad_before > 0.0 {
             pen.total += ceil64(pen.item) + g.pad_before;
             pen.item = 0.0;
@@ -749,17 +888,49 @@ impl<'a> Para<'a> {
         }
     }
 
-    fn breaks(&self) -> Vec<(usize, usize)> {
+    fn place_gaps(&mut self, breaks: &[breaker::Break]) {
+        for b in breaks {
+            let ls = b.start;
+            let Some(first) = self.g.get(ls) else {
+                continue;
+            };
+            if first.gap_before == 0.0 {
+                continue;
+            }
+            let lo = ls.checked_sub(1).map_or(0, |k| self.g[k].span + 1);
+            let gap = (lo..first.span)
+                .filter(|s| b.spans.binary_search(s).is_ok())
+                .map(|s| 2.0 * self.styles[s].pad)
+                .sum();
+            self.g[ls].gap_before = gap;
+        }
+    }
+
+    fn breaks(&self) -> Vec<breaker::Break> {
         if self.g.is_empty() {
             return Vec::new();
         }
         breaker::Breaker::new(self).run()
     }
 
-    fn line(&self, ls: usize, le: usize, lf: bool, top: f32) -> Line {
+    fn line(&self, b: &breaker::Break, top: f32) -> Line {
+        let (ls, le, spans) = (b.start, b.end, &b.spans);
         let t = self.trail(ls, le);
-        let (adv, mut trims) = self.shape_range(ls, t);
+        let skip = b.skip.filter(|&k| k < t);
+        let (mut adv, mut trims) = self.shape_range(ls, t);
+        if let Some(k) = skip {
+            adv[k - ls] = 0.0;
+        }
         let (full, mut pos) = self.walk(ls, t, &adv);
+        let hang_pad: f32 = (t..le)
+            .filter(|&k| {
+                t > ls
+                    && self.g[k].span == self.g[t - 1].span
+                    && self.styles[self.g[k].span].ws == WhiteSpace::Normal
+            })
+            .map(|k| self.g[k].pad_after)
+            .sum();
+        let full = full + hang_pad;
         let soft = le < self.g.len() && !self.g[le].nl;
         let trim = if (self.wrap || soft) && full > self.avail && t > ls {
             self.end_trim(t)
@@ -769,7 +940,7 @@ impl<'a> Para<'a> {
         if let Some(p) = pos.last_mut() {
             p.1 -= trim;
         }
-        let vpos = self.visual(ls, t, &pos);
+        let vpos = self.visual(ls, t, le, hang_pad, skip, &pos);
         let ink: Vec<usize> = (ls..t)
             .filter(|&k| !self.g[k].space && !self.g[k].tab && !self.g[k].cr)
             .collect();
@@ -784,8 +955,8 @@ impl<'a> Para<'a> {
         };
         let (mut above, mut below) = self.strut;
         let mut prev = None;
-        for k in ls..le + usize::from(lf) {
-            let span = self.g[k].span;
+        let graphemes = (ls..le).map(|k| self.g[k].span);
+        for span in graphemes.chain(spans.iter().copied()) {
             if prev == Some(span) {
                 continue;
             }
@@ -808,7 +979,11 @@ impl<'a> Para<'a> {
         let mut runs = Vec::new();
         let mut boxes = Vec::new();
         let mut glyphs = Vec::new();
-        for (a, b) in self.items(ls, t) {
+        let items = self.items(ls, t).into_iter().flat_map(|(a, b)| match skip {
+            Some(k) if (a..b).contains(&k) => [(a, k), (k + 1, b)],
+            _ => [(a, b), (b, b)],
+        });
+        for (a, b) in items.filter(|(a, b)| a < b) {
             let first = &self.g[a];
             if first.tab || first.nl || first.cr {
                 continue;
@@ -936,8 +1111,16 @@ impl<'a> Para<'a> {
         }
     }
 
-    fn visual(&self, ls: usize, t: usize, pos: &[(f32, f32)]) -> Vec<(f32, f32)> {
-        if (ls..t).all(|k| self.g[k].level.is_multiple_of(2)) {
+    fn visual(
+        &self,
+        ls: usize,
+        t: usize,
+        le: usize,
+        hang_pad: f32,
+        skip: Option<usize>,
+        pos: &[(f32, f32)],
+    ) -> Vec<(f32, f32)> {
+        if !self.rtl_base && (ls..t).all(|k| self.g[k].level.is_multiple_of(2)) {
             return pos.to_vec();
         }
         let mut groups: Vec<(usize, usize)> = Vec::new();
@@ -948,23 +1131,68 @@ impl<'a> Para<'a> {
                 g.1 = k + 1;
             }
         }
-        let levels: Vec<u8> = groups.iter().map(|&(a, _)| self.g[a].level).collect();
+        let base = u8::from(self.rtl_base);
+        let tail = (ls..le)
+            .rev()
+            .take_while(|&k| self.g[k].cr)
+            .last()
+            .unwrap_or(t);
+        let mut levels: Vec<u8> = groups
+            .iter()
+            .map(|&(a, _)| if a >= tail { base } else { self.g[a].level })
+            .collect();
+        if let Some(gi) = groups
+            .iter()
+            .position(|&(a, b)| Some(a) == skip && b == a + 1)
+        {
+            if let Some(&next) = levels.get(gi + 1) {
+                levels[gi] = next;
+                for j in (0..gi).rev().take_while(|&j| self.g[groups[j].0].cr) {
+                    levels[j] = next;
+                }
+            }
+        }
         let mut vpos = pos.to_vec();
         let mut cursor = 0.0f32;
-        for gi in visual_order(&levels) {
-            let (a, b) = groups[gi];
-            cursor += self.g[a].pad_before;
-            let left = pos[a - ls].0;
-            let right = pos[b - 1 - ls].1;
-            for k in a..b {
-                let (x0, x1) = pos[k - ls];
-                vpos[k - ls] = if levels[gi] % 2 == 1 {
-                    (cursor + (right - x1), cursor + (right - x0))
-                } else {
-                    (cursor + (x0 - left), cursor + (x1 - left))
-                };
+        let order = visual_order(&levels);
+        let span = |gi: usize| self.g[groups[gi].0].span;
+        for run in order.chunk_by(|&x, &y| span(x) == span(y)) {
+            let start: f32 = run.iter().map(|&gi| self.g[groups[gi].0].pad_before).sum();
+            let end: f32 = run
+                .iter()
+                .map(|&gi| {
+                    let b = groups[gi].1;
+                    self.g[b - 1].pad_after + if b == t { hang_pad } else { 0.0 }
+                })
+                .sum();
+            let (pad_left, pad_right) = if self.rtl_base {
+                (end, start)
+            } else {
+                (start, end)
+            };
+            cursor += pad_left;
+            for &gi in run {
+                let (a, b) = groups[gi];
+                let odd = levels[gi] % 2 == 1;
+                if !odd {
+                    cursor += self.g[a].gap_before;
+                }
+                let left = pos[a - ls].0;
+                let right = pos[b - 1 - ls].1;
+                for k in a..b {
+                    let (x0, x1) = pos[k - ls];
+                    vpos[k - ls] = if odd {
+                        (cursor + (right - x1), cursor + (right - x0))
+                    } else {
+                        (cursor + (x0 - left), cursor + (x1 - left))
+                    };
+                }
+                cursor += ceil64(right - left);
+                if odd {
+                    cursor += self.g[a].gap_before;
+                }
             }
-            cursor += ceil64(right - left) + self.g[b - 1].pad_after;
+            cursor += pad_right;
         }
         vpos
     }
@@ -1001,6 +1229,47 @@ fn line_levels(bidi: &BidiInfo) -> Vec<Level> {
         }
     }
     levels
+}
+
+fn boundary_neutral_levels(bidi: &BidiInfo, levels: &mut [Level]) {
+    let mut next = None;
+    for (i, _) in bidi.text.char_indices().rev() {
+        match bidi.original_classes[i] {
+            BidiClass::BN => {
+                if let Some(level) = next {
+                    levels[i] = level;
+                }
+            }
+            BidiClass::B | BidiClass::S => next = None,
+            _ => next = Some(levels[i]),
+        }
+    }
+}
+
+fn carriage_return_levels(text: &str, span_of: &[usize], levels: &mut [Level]) {
+    let mut next = None;
+    let mut found = Vec::new();
+    for (i, c) in text.char_indices().rev() {
+        if c == '\r' {
+            found.push((i, next));
+        } else {
+            next = Some((i, c));
+        }
+    }
+    for (i, next) in found.into_iter().rev() {
+        let inner = next
+            .filter(|&(k, c)| c != '\n' && span_of[k] == span_of[i])
+            .map(|(k, _)| k);
+        let before = text[..i]
+            .char_indices()
+            .next_back()
+            .filter(|&(_, c)| c != '\n')
+            .map(|(j, _)| j);
+        let own = before.filter(|&j| span_of[j] == span_of[i]);
+        if let Some(j) = inner.or(own).or(next.map(|(k, _)| k)).or(before) {
+            levels[i] = levels[j];
+        }
+    }
 }
 
 fn visual_order(levels: &[u8]) -> Vec<usize> {
@@ -1076,13 +1345,13 @@ pub fn layout(
             check_size(style.size)?;
         }
     }
-    let p = Para::new(fonts, para, inlines);
+    let mut p = Para::new(fonts, para, inlines);
     let mut lines = Vec::new();
     let mut top = 0.0f32;
     let breaks = p.breaks();
-    for (i, &(ls, le)) in breaks.iter().enumerate() {
-        let lf = p.g.get(le).is_some_and(|g| g.nl) && breaks.get(i + 1) != Some(&(le, le));
-        let line = p.line(ls, le, lf, top);
+    p.place_gaps(&breaks);
+    for b in &breaks {
+        let line = p.line(b, top);
         top += line.height;
         lines.push(line);
     }

@@ -30,6 +30,13 @@ enum State {
     Done,
 }
 
+pub(super) struct Break {
+    pub(super) start: usize,
+    pub(super) end: usize,
+    pub(super) skip: Option<usize>,
+    pub(super) spans: Vec<usize>,
+}
+
 #[derive(Clone, Copy)]
 struct Res {
     item: usize,
@@ -77,6 +84,7 @@ pub(super) struct Breaker<'b, 'a> {
     over: bool,
     state: State,
     leading: bool,
+    skip: Option<(usize, usize)>,
     forced: bool,
     res: Vec<Res>,
     position: f32,
@@ -184,12 +192,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
                 hang[e - 1]
             };
         }
-        let pad = p
-            .styles
-            .iter()
-            .zip(&count)
-            .map(|(st, &c)| if c > 0 { st.pad } else { 0.0 })
-            .collect();
+        let pad = p.styles.iter().zip(&count).map(|(st, _)| st.pad).collect();
         Breaker {
             p,
             items,
@@ -208,6 +211,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
             over: false,
             state: State::Continue,
             leading: true,
+            skip: None,
             forced: false,
             res: Vec::new(),
             position: 0.0,
@@ -219,10 +223,10 @@ impl<'b, 'a> Breaker<'b, 'a> {
         }
     }
 
-    pub(super) fn run(mut self) -> Vec<(usize, usize)> {
+    pub(super) fn run(mut self) -> Vec<Break> {
         let n = self.p.g.len();
         self.set_style(None);
-        let mut lines: Vec<(usize, Option<usize>)> = Vec::new();
+        let mut lines: Vec<(Option<usize>, Break)> = Vec::new();
         while self.item < self.items.len() {
             let start = (self.item, self.off);
             self.res.clear();
@@ -260,36 +264,41 @@ impl<'b, 'a> Breaker<'b, 'a> {
             if !self.res.last().is_some_and(|r| r.lb) {
                 continue;
             }
-            let skipped = self
-                .p
-                .g
-                .get(self.ls)
-                .is_some_and(|g| g.space && self.p.styles[g.span].ws == WhiteSpace::Normal);
-            let lo = self.ls + usize::from(skipped);
             let lf = self
                 .res
                 .iter()
                 .map(|r| self.items[r.item])
                 .find(|it| it.kind == Kind::Lf)
                 .map(|it| it.a);
-            lines.push((lo, lf));
+            let mut spans: Vec<usize> = self.res.iter().map(|r| self.items[r.item].span).collect();
+            spans.dedup();
+            lines.push((
+                lf,
+                Break {
+                    start: self.ls,
+                    end: n,
+                    skip: self.skip.map(|(_, k)| k),
+                    spans,
+                },
+            ));
         }
-        let mut out = Vec::with_capacity(lines.len());
+        let starts: Vec<usize> = lines.iter().map(|(_, b)| b.start).skip(1).collect();
         let mut s = 0;
-        for (i, &(_, lf)) in lines.iter().enumerate() {
-            match lf {
-                Some(k) => {
-                    out.push((s, k));
-                    s = k + 1;
+        lines
+            .into_iter()
+            .enumerate()
+            .map(|(i, (lf, b))| {
+                let start = s;
+                let end = lf.unwrap_or_else(|| starts.get(i).copied().unwrap_or(n));
+                s = lf.map_or(end, |k| k + 1);
+                Break {
+                    start,
+                    end,
+                    skip: b.skip.filter(|&k| k >= start),
+                    spans: b.spans,
                 }
-                None => {
-                    let e = lines.get(i + 1).map_or(n, |l| l.0);
-                    out.push((s, e));
-                    s = e;
-                }
-            }
-        }
-        out
+            })
+            .collect()
     }
 
     fn ws(&self, st: Option<usize>) -> WhiteSpace {
@@ -322,12 +331,15 @@ impl<'b, 'a> Breaker<'b, 'a> {
             return 0.0;
         }
         let g = &self.p.g;
-        self.base(b) - self.base(a) - g[a].pad_before - g[b - 1].pad_after
+        self.base(b) - self.base(a) - g[a].gap_before - g[a].pad_before - g[b - 1].pad_after
     }
 
     fn breakable(&self, k: usize) -> bool {
         let g = &self.p.g;
         if k <= self.ls {
+            return false;
+        }
+        if k < g.len() && g[k].nl && g[k - 1].cr {
             return false;
         }
         if k >= g.len() || self.char_break {
@@ -590,6 +602,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
         }
         if self.leading && self.ws(Some(it.span)) == WhiteSpace::Normal && self.p.g[self.off].space
         {
+            self.skip = Some((self.res.len(), self.off));
             self.off += 1;
             if self.off == it.b {
                 self.handle_empty(ii);
@@ -839,6 +852,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
             self.set_style(st);
         }
         self.res.truncate(new_end);
+        self.skip = self.skip.filter(|&(j, _)| j < new_end);
         self.position = self.res.iter().map(|r| r.w).sum();
     }
 
@@ -1001,6 +1015,7 @@ impl<'b, 'a> Breaker<'b, 'a> {
     fn break_line(&mut self) {
         self.state = State::Continue;
         self.leading = true;
+        self.skip = None;
         while self.state != State::Done {
             if self.item >= self.items.len() {
                 if self.handle_overflow_if_needed() && self.item < self.items.len() {

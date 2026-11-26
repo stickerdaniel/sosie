@@ -55,9 +55,9 @@ const CASES: [(&str, &str, Direction); 4] = [
 ];
 
 fn render_chart(fonts: &Fonts, theme: Theme) -> Pixmap {
-    let list =
+    let rendered =
         chart::render(fonts, &reference_chart(), theme, 814).unwrap_or_else(|e| panic!("{e}"));
-    rasterize(fonts, &list, 2.0, &Default::default()).expect("render")
+    rasterize(fonts, &rendered.list, 2.0, &Default::default()).expect("render")
 }
 
 fn cases(fonts: &Fonts) -> Vec<(String, Pixmap)> {

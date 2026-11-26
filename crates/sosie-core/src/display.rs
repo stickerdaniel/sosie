@@ -57,6 +57,19 @@ pub enum Item {
         width: f32,
         color: Rgba,
     },
+    ClippedBorder {
+        shape: Shape,
+        clip: Shape,
+        width: f32,
+        color: Rgba,
+    },
+    Hatch {
+        shape: Shape,
+        clip: Shape,
+        color: Rgba,
+        stripe: f32,
+        period: f32,
+    },
     Glyphs {
         face: FaceId,
         size: f32,

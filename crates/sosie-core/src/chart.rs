@@ -10,23 +10,29 @@ use std::fmt;
 pub const PRIMER: &str = "@primer/primitives@11.10.0";
 pub const FONT_STACK: &str = r#""Mona Sans VF", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Backtick Fix", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji""#;
 
-const MIN_WIDTH: u32 = 310;
+pub const NAME_WIDTH: f32 = 250.0;
 const MAX_WIDTH: u32 = 4096;
 const CHECKED_DPR: f32 = 2.0;
 const MAX_CHANGE: f64 = 1e21;
 const MINUS: char = '\u{2212}';
+const ARROW: char = '\u{2192}';
 const BORDER: f32 = 1.0;
 const RADIUS: f32 = 6.0;
 const PADDING_X: f32 = 16.0;
 const HEADER_PADDING_Y: f32 = 12.0;
-const ROW_PADDING_TOP: f32 = 12.0;
-const ROW_PADDING_BOTTOM: f32 = 14.0;
-const HEAD_MARGIN: f32 = 6.0;
+const ROW_PADDING_Y: f32 = 10.0;
 const GAP: f32 = 16.0;
-const BAR: f32 = 22.0;
 const TRACK: f32 = 10.0;
-const VALUE_WIDTH: f32 = 144.0;
+const MIN_TRACK: f32 = 100.0;
+const VALUE_WIDTH: f32 = 150.0;
+const MIN_CHANGE_WIDTH: f32 = 64.0;
+const FIXED_COLUMNS: f32 = 2.0 * (BORDER + PADDING_X) + NAME_WIDTH + VALUE_WIDTH + 3.0 * GAP;
+const MIN_WIDTH: u32 = (FIXED_COLUMNS + MIN_TRACK + MIN_CHANGE_WIDTH) as u32;
 const MIN_FILL_PERCENT: f64 = 0.5;
+const STRIPE: f32 = 3.0;
+const STRIPE_PERIOD: f32 = 6.0;
+const STRIPE_ALPHA_PERCENT: u32 = 45;
+const OUTLINE_ALPHA_PERCENT: u32 = 55;
 const FIT_TOLERANCE: f32 = 1.0 / 64.0;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -85,6 +91,7 @@ pub enum MetricError {
     Change,
     NameTooWide,
     ValueTooWide,
+    ChangeTooWide,
 }
 
 impl fmt::Display for MetricError {
@@ -97,15 +104,17 @@ impl fmt::Display for MetricError {
                 f,
                 "the change is not a finite percentage below {MAX_CHANGE:e}"
             ),
-            MetricError::NameTooWide => {
-                write!(
-                    f,
-                    "a line of the name is wider than the space beside the change"
-                )
-            }
+            MetricError::NameTooWide => write!(
+                f,
+                "a word of the name is wider than the {NAME_WIDTH} px name column"
+            ),
             MetricError::ValueTooWide => write!(
                 f,
-                "the key and the value are wider than the {VALUE_WIDTH} px value column"
+                "before, arrow and after are wider than the {VALUE_WIDTH} px value column"
+            ),
+            MetricError::ChangeTooWide => write!(
+                f,
+                "the change leaves the track narrower than {MIN_TRACK} px at this width"
             ),
         }
     }
@@ -128,7 +137,7 @@ impl fmt::Display for ChartError {
             ChartError::NoMetrics => write!(f, "the chart needs at least one metric"),
             ChartError::Width { width } => write!(
                 f,
-                "width {width} px is outside {MIN_WIDTH} to {MAX_WIDTH} px"
+                "width {width} px is outside {MIN_WIDTH} to {MAX_WIDTH} px; {MIN_WIDTH} px leaves a {MIN_TRACK} px track beside the {NAME_WIDTH} px name, {VALUE_WIDTH} px value and {MIN_CHANGE_WIDTH} px change columns"
             ),
             ChartError::Size(e) => write!(f, "the chart at dpr {CHECKED_DPR} is too large: {e}"),
             ChartError::TitleTooWide => write!(f, "a line of the title is wider than the header"),
@@ -229,7 +238,7 @@ impl Palette {
         }
     }
 
-    fn after_fill(&self, tone: Tone) -> Rgba {
+    fn tone_fill(&self, tone: Tone) -> Rgba {
         match tone {
             Tone::Success => self.bg_success_emphasis,
             Tone::Danger => self.bg_danger_emphasis,
@@ -384,15 +393,8 @@ struct Typesetter<'a> {
 }
 
 impl Typesetter<'_> {
-    fn set(
-        &self,
-        text: &str,
-        font: Font,
-        color: Rgba,
-        white_space: WhiteSpace,
-        width: f32,
-    ) -> TextLayout {
-        let style = TextStyle {
+    fn style(&self, font: Font, color: Rgba, white_space: WhiteSpace) -> TextStyle {
+        TextStyle {
             family: self.family.clone(),
             size: font.size,
             line_height: font.line_height,
@@ -402,24 +404,43 @@ impl Typesetter<'_> {
             white_space,
             tab_size: 8,
             background: None,
-        };
+        }
+    }
+
+    fn set_runs(
+        &self,
+        runs: &[(&str, Font, Rgba)],
+        white_space: WhiteSpace,
+        width: f32,
+    ) -> TextLayout {
+        let inlines: Vec<Inline> = runs
+            .iter()
+            .map(|&(text, font, color)| Inline::Text {
+                text: text.to_string(),
+                style: self.style(font, color, white_space),
+            })
+            .collect();
+        let (_, font, color) = runs[0];
         let para = Paragraph {
             width,
-            strut: style.clone(),
+            strut: self.style(font, color, white_space),
             overflow_wrap: OverflowWrap::Normal,
             direction: Direction::Ltr,
             dpr: CHECKED_DPR,
         };
-        let inlines = [Inline::Text {
-            text: text.to_string(),
-            style,
-        }];
         layout(self.fonts, &para, &inlines).expect("chart font sizes lie within the layout limits")
     }
-}
 
-fn track_width(inner: f32) -> f32 {
-    inner - GAP - VALUE_WIDTH
+    fn set(
+        &self,
+        text: &str,
+        font: Font,
+        color: Rgba,
+        white_space: WhiteSpace,
+        width: f32,
+    ) -> TextLayout {
+        self.set_runs(&[(text, font, color)], white_space, width)
+    }
 }
 
 fn advance(text: &TextLayout) -> f32 {
@@ -430,17 +451,62 @@ fn overflows(text: &TextLayout, room: f32) -> bool {
     text.lines.iter().any(|l| l.advance > room + FIT_TOLERANCE)
 }
 
-struct Bar {
-    width: f32,
+fn with_alpha(color: Rgba, percent: u32) -> Rgba {
+    Rgba {
+        a: ((color.a as u32 * percent + 50) / 100) as u8,
+        ..color
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Ink {
+    Solid,
+    Hatched,
+}
+
+#[derive(Clone, Copy)]
+struct Segment {
+    from: f64,
+    to: f64,
     color: Rgba,
-    key: TextLayout,
-    value: TextLayout,
+    ink: Ink,
+}
+
+fn segments(palette: &Palette, metric: &Metric, tone: Tone, scale: f64) -> Vec<Segment> {
+    let percent = |v: f64| v.abs() / scale * 100.0;
+    let (before, after) = (percent(metric.before), percent(metric.after));
+    let fill = palette.tone_fill(tone);
+    let solid = |from, to, color| Segment {
+        from,
+        to,
+        color,
+        ink: Ink::Solid,
+    };
+    if after < before {
+        vec![
+            solid(0.0, after.max(MIN_FILL_PERCENT), fill),
+            Segment {
+                from: after,
+                to: before,
+                color: fill,
+                ink: Ink::Hatched,
+            },
+        ]
+    } else if after > before {
+        vec![
+            solid(0.0, before, palette.border_emphasis),
+            solid(before, after, fill),
+        ]
+    } else {
+        vec![solid(0.0, before.max(MIN_FILL_PERCENT), fill)]
+    }
 }
 
 struct Row {
     name: TextLayout,
+    values: TextLayout,
     change: TextLayout,
-    bars: [Bar; 2],
+    segments: Vec<Segment>,
 }
 
 impl Row {
@@ -448,111 +514,148 @@ impl Row {
         set: &Typesetter,
         palette: &Palette,
         metric: &Metric,
-        inner: f32,
+        scale: f64,
     ) -> Result<Row, MetricError> {
         let change = percent_change(metric.before, metric.after)?;
         let tone = tone(change, metric.lower_is_better);
-        let change = set.set(
-            &format_change(change),
-            BODY_BOLD,
-            palette.change_color(tone),
-            WhiteSpace::Pre,
-            inner,
-        );
-        let room = inner - GAP - advance(&change);
-        if room <= 0.0 {
-            return Err(MetricError::NameTooWide);
-        }
         let name = set.set(
             &metric.name,
             BODY_BOLD,
             palette.fg_default,
             WhiteSpace::Normal,
-            room,
+            NAME_WIDTH,
         );
-        if overflows(&name, room) {
+        if overflows(&name, NAME_WIDTH) {
             return Err(MetricError::NameTooWide);
         }
-        let track = track_width(inner);
-        let max = metric.before.abs().max(metric.after.abs());
-        let bar = |value: f64, color: Rgba, label: &str, font: Font, text_color: Rgba| {
-            let key = set.set(label, SMALL, palette.fg_muted, WhiteSpace::Pre, VALUE_WIDTH);
-            let text = collapse_white_space(&format_value(value, &metric.unit));
-            let value_text = set.set(&text, font, text_color, WhiteSpace::Pre, VALUE_WIDTH);
-            if advance(&key) + advance(&value_text) > VALUE_WIDTH {
-                return Err(MetricError::ValueTooWide);
-            }
-            let percent = (value.abs() / max * 100.0).max(MIN_FILL_PERCENT);
-            Ok(Bar {
-                width: (track as f64 * percent / 100.0) as f32,
-                color,
-                key,
-                value: value_text,
-            })
-        };
-        let bars = [
-            bar(
-                metric.before,
-                palette.border_emphasis,
-                "Before",
-                SMALL,
-                palette.fg_muted,
-            )?,
-            bar(
-                metric.after,
-                palette.after_fill(tone),
-                "After",
-                SMALL_BOLD,
-                palette.fg_default,
-            )?,
-        ];
-        Ok(Row { name, change, bars })
+        let before = format!("{} {ARROW} ", format_value(metric.before, ""));
+        let after = collapse_white_space(&format_value(metric.after, &metric.unit));
+        let values = set.set_runs(
+            &[
+                (&before, SMALL, palette.fg_muted),
+                (&after, SMALL_BOLD, palette.fg_default),
+            ],
+            WhiteSpace::Pre,
+            VALUE_WIDTH,
+        );
+        if advance(&values) > VALUE_WIDTH {
+            return Err(MetricError::ValueTooWide);
+        }
+        let change = set.set(
+            &format_change(change),
+            BODY_BOLD,
+            palette.change_color(tone),
+            WhiteSpace::Pre,
+            f32::MAX,
+        );
+        Ok(Row {
+            name,
+            values,
+            change,
+            segments: segments(palette, metric, tone, scale),
+        })
     }
 
-    fn head_height(&self) -> f32 {
-        self.name.height.max(self.change.height)
+    fn content_height(&self) -> f32 {
+        [&self.name, &self.values, &self.change]
+            .iter()
+            .map(|t| t.height)
+            .fold(TRACK, f32::max)
     }
 
     fn height(&self) -> f32 {
-        ROW_PADDING_TOP + self.head_height() + HEAD_MARGIN + 2.0 * BAR + ROW_PADDING_BOTTOM
+        2.0 * ROW_PADDING_Y + self.content_height()
     }
 
-    fn paint(&self, list: &mut DisplayList, palette: &Palette, left: f32, right: f32, top: f32) {
-        let head = top + ROW_PADDING_TOP;
-        self.name.paint(list, left, head);
-        self.change.paint(list, right - advance(&self.change), head);
-        let mut bar_top = head + self.head_height() + HEAD_MARGIN;
-        for bar in &self.bars {
-            let track = Shape {
-                rect: Rect {
-                    x: left,
-                    y: bar_top + (BAR - TRACK) / 2.0,
-                    w: track_width(right - left),
-                    h: TRACK,
-                },
-                radii: Radii::all(RADIUS),
-            };
-            list.push(Item::Fill {
-                shape: track,
-                color: palette.bg_neutral_muted,
-            });
-            list.push(Item::ClippedFill {
-                shape: Shape {
-                    rect: Rect {
-                        w: bar.width,
-                        ..track.rect
+    fn paint(&self, list: &mut DisplayList, palette: &Palette, columns: &Columns, top: f32) {
+        let content = self.content_height();
+        let centered = |h: f32| top + ROW_PADDING_Y + (content - h) / 2.0;
+        self.name
+            .paint(list, columns.name, centered(self.name.height));
+        let track = Shape {
+            rect: Rect {
+                x: columns.track,
+                y: centered(TRACK),
+                w: columns.track_width,
+                h: TRACK,
+            },
+            radii: Radii::all(RADIUS),
+        };
+        list.push(Item::Fill {
+            shape: track,
+            color: palette.bg_neutral_muted,
+        });
+        let width = f64::from(columns.track_width);
+        for segment in &self.segments {
+            let x = (f64::from(columns.track) + width * segment.from / 100.0) as f32;
+            let w = (width * (segment.to - segment.from) / 100.0) as f32;
+            let rect = Rect { x, w, ..track.rect };
+            match segment.ink {
+                Ink::Solid => list.push(Item::ClippedFill {
+                    shape: Shape {
+                        rect,
+                        radii: Radii::default(),
                     },
-                    ..track
-                },
-                clip: track,
-                color: bar.color,
-            });
-            let text_top = bar_top + (BAR - SMALL.line_height) / 2.0;
-            bar.key.paint(list, right - VALUE_WIDTH, text_top);
-            bar.value.paint(list, right - advance(&bar.value), text_top);
-            bar_top += BAR;
+                    clip: track,
+                    color: segment.color,
+                }),
+                Ink::Hatched => {
+                    let shape = Shape {
+                        rect,
+                        radii: Radii {
+                            tl: 0.0,
+                            tr: RADIUS,
+                            br: RADIUS,
+                            bl: 0.0,
+                        },
+                    };
+                    list.push(Item::Hatch {
+                        shape,
+                        clip: track,
+                        color: with_alpha(segment.color, STRIPE_ALPHA_PERCENT),
+                        stripe: STRIPE,
+                        period: STRIPE_PERIOD,
+                    });
+                    list.push(Item::ClippedBorder {
+                        shape,
+                        clip: track,
+                        width: BORDER,
+                        color: with_alpha(segment.color, OUTLINE_ALPHA_PERCENT),
+                    });
+                }
+            }
         }
+        self.values.paint(
+            list,
+            columns.values_end - advance(&self.values),
+            centered(self.values.height),
+        );
+        self.change.paint(
+            list,
+            columns.right - advance(&self.change),
+            centered(self.change.height),
+        );
     }
+}
+
+struct Columns {
+    name: f32,
+    track: f32,
+    track_width: f32,
+    values_end: f32,
+    right: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WrappedName {
+    pub index: usize,
+    pub lines: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Rendered {
+    pub list: DisplayList,
+    pub wrapped: Vec<WrappedName>,
 }
 
 pub fn render(
@@ -560,7 +663,7 @@ pub fn render(
     chart: &Chart,
     theme: Theme,
     width: u32,
-) -> Result<DisplayList, ChartError> {
+) -> Result<Rendered, ChartError> {
     if !(MIN_WIDTH..=MAX_WIDTH).contains(&width) {
         return Err(ChartError::Width { width });
     }
@@ -589,15 +692,38 @@ pub fn render(
         }
         None => None,
     };
+    let scale = chart
+        .metrics()
+        .iter()
+        .map(|m| m.before.abs().max(m.after.abs()))
+        .fold(0.0, f64::max);
     let rows = chart
         .metrics()
         .iter()
         .enumerate()
         .map(|(index, metric)| {
-            Row::new(&set, palette, metric, inner)
+            Row::new(&set, palette, metric, scale)
                 .map_err(|error| ChartError::Metric { index, error })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let widest_change = width - FIXED_COLUMNS - MIN_TRACK;
+    if let Some(index) = rows.iter().position(|r| advance(&r.change) > widest_change) {
+        return Err(ChartError::Metric {
+            index,
+            error: MetricError::ChangeTooWide,
+        });
+    }
+    let change_width = rows
+        .iter()
+        .map(|r| advance(&r.change))
+        .fold(MIN_CHANGE_WIDTH, f32::max);
+    let columns = Columns {
+        name: left,
+        track: left + NAME_WIDTH + GAP,
+        track_width: width - FIXED_COLUMNS - change_width,
+        values_end: right - change_width - GAP,
+        right,
+    };
     let header = title.map(|text| {
         let height = 2.0 * HEADER_PADDING_Y + text.height;
         (text, height)
@@ -666,8 +792,17 @@ pub fn render(
             });
             y += BORDER;
         }
-        row.paint(&mut list, palette, left, right, y);
+        row.paint(&mut list, palette, &columns, y);
         y += row.height();
     }
-    Ok(list)
+    let wrapped = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| row.name.lines.len() > 1)
+        .map(|(index, row)| WrappedName {
+            index,
+            lines: row.name.lines.len(),
+        })
+        .collect();
+    Ok(Rendered { list, wrapped })
 }

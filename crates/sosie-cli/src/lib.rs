@@ -4,8 +4,10 @@ mod input;
 pub mod output;
 
 use output::{OutputError, Targets};
+use sosie_core::chart::NAME_WIDTH;
 use sosie_core::{
     chart, encode, rasterize, Chart, ChartError, EncodeError, Fonts, Format, Pixmap, Theme,
+    WrappedName,
 };
 use std::ffi::OsString;
 use std::fmt;
@@ -19,8 +21,11 @@ Renders metric bars in light and dark at dpr 2, writes
 
 metrics.json: { "title"?: string, "metrics": [{ "name": string, "unit": string, "before": number, "after": number, "lowerIsBetter": boolean }] }
 
-  --width   CSS px from 310 to 4096, default 978
+  --width   CSS px from 646 to 4096, default 978
   --format  webp (lossless, default) or png
+
+A name wider than the 250 px name column wraps and makes its row taller.
+Each such name prints a warning to stderr; the files are still written.
 
 These receivers need --format png: Slack image blocks, Outlook for Windows,
 LinkedIn and Facebook og:image, Gmail (converts WebP to JPG), desk albums
@@ -143,13 +148,19 @@ fn output_paths(prefix: &OsString, format: Format) -> [PathBuf; 2] {
     })
 }
 
-fn render(fonts: &Fonts, chart: &Chart, theme: Theme, width: u32) -> Result<Pixmap, Error> {
-    let list = chart::render(fonts, chart, theme, width).map_err(|e| match e {
+fn render(
+    fonts: &Fonts,
+    chart: &Chart,
+    theme: Theme,
+    width: u32,
+) -> Result<(Pixmap, Vec<WrappedName>), Error> {
+    let rendered = chart::render(fonts, chart, theme, width).map_err(|e| match e {
         ChartError::Width { .. } => Error::Input(format!("--width: {e}")),
         e => Error::Input(format!("metrics.json: {e}")),
     })?;
-    rasterize(fonts, &list, DPR, &Default::default())
-        .map_err(|e| Error::Input(format!("metrics.json: {e}")))
+    let pixmap = rasterize(fonts, &rendered.list, DPR, &Default::default())
+        .map_err(|e| Error::Input(format!("metrics.json: {e}")))?;
+    Ok((pixmap, rendered.wrapped))
 }
 
 fn chart_command(args: &ChartArgs, stdout: &mut impl Write) -> Result<(), Error> {
@@ -162,7 +173,8 @@ fn chart_command(args: &ChartArgs, stdout: &mut impl Write) -> Result<(), Error>
         .map_err(|e| Error::Input(format!("metrics.json: {e}")))?;
     let fonts = Fonts::new();
     let [light, dark] = [Theme::Light, Theme::Dark].map(|t| render(&fonts, &chart, t, args.width));
-    let pixmaps = [light?, dark?];
+    let ((light, wrapped), (dark, _)) = (light?, dark?);
+    let pixmaps = [light, dark];
     let targets = Targets::check(output_paths(&args.prefix, args.format)).map_err(Error::Output)?;
     let paths = targets.paths();
     let [light, dark] = std::array::from_fn(|i| {
@@ -180,6 +192,10 @@ fn chart_command(args: &ChartArgs, stdout: &mut impl Write) -> Result<(), Error>
         .map_err(Error::Output)?;
     for backup in stale {
         eprintln!("sosie: warning: {backup}");
+    }
+    for WrappedName { index, lines } in wrapped {
+        let name = &chart.metrics()[index].name;
+        eprintln!("sosie: warning: metrics[{index}] name wraps onto {lines} lines in the {NAME_WIDTH} px name column: {name:?}; a shorter name keeps the row on one line");
     }
     for path in paths {
         writeln!(stdout, "{}", path.display()).map_err(Error::Stdout)?;

@@ -7,8 +7,8 @@ use sosie_core::chart::{
 };
 use sosie_core::{
     layout, rasterize, Chart, ChartError, Direction, DisplayList, FamilyList, Fonts, Inline, Item,
-    LimitError, MetricError, OverflowWrap, Palette, Paragraph, Pixmap, Radii, Rect, Rgba, Shape,
-    TextStyle, Theme, Tone, WhiteSpace,
+    LimitError, MetricError, OverflowWrap, Palette, Paragraph, Pixmap, Radii, Rect, Rendered, Rgba,
+    Shape, TextStyle, Theme, Tone, WhiteSpace, WrappedName,
 };
 use std::collections::BTreeMap;
 
@@ -149,12 +149,12 @@ fn fonts() -> Fonts {
     Fonts::new()
 }
 
-fn draw(chart: &Chart, width: u32) -> Result<DisplayList, ChartError> {
+fn draw(chart: &Chart, width: u32) -> Result<Rendered, ChartError> {
     render(&fonts(), chart, Theme::Light, width)
 }
 
 fn list(chart: &Chart) -> DisplayList {
-    draw(chart, W).unwrap_or_else(|e| panic!("{e}"))
+    draw(chart, W).unwrap_or_else(|e| panic!("{e}")).list
 }
 
 fn chart(title: Option<&str>, metrics: Vec<sosie_core::Metric>) -> Chart {
@@ -196,14 +196,8 @@ fn unwrapped(text: &str, size: f32, weight: u16) -> f32 {
     measure(text, size, weight, WhiteSpace::Pre, 1e4)[0]
 }
 
-fn clipped(list: &DisplayList) -> Vec<(Shape, Shape)> {
-    list.items
-        .iter()
-        .filter_map(|i| match i {
-            Item::ClippedFill { shape, clip, .. } => Some((*shape, *clip)),
-            _ => None,
-        })
-        .collect()
+fn name_lines(name: &str) -> usize {
+    measure(name, 14.0, 600, WhiteSpace::Normal, 250.0).len()
 }
 
 fn glyph_runs(list: &DisplayList) -> Vec<(f32, f32)> {
@@ -216,91 +210,327 @@ fn glyph_runs(list: &DisplayList) -> Vec<(f32, f32)> {
         .collect()
 }
 
+fn tracks(list: &DisplayList) -> Vec<Rect> {
+    list.items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Fill { shape, .. } if shape.rect.h == 10.0 => Some(shape.rect),
+            _ => None,
+        })
+        .collect()
+}
+
+#[derive(Debug, PartialEq)]
+enum Ink {
+    Solid(Rgba),
+    Stripes(Rgba),
+    Outline(Rgba),
+}
+
+#[derive(Debug)]
+struct Segment {
+    ink: Ink,
+    x: f32,
+    w: f32,
+    shape: Shape,
+    clip: Shape,
+}
+
+fn segments(list: &DisplayList) -> Vec<Segment> {
+    list.items
+        .iter()
+        .filter_map(|i| {
+            let (ink, shape, clip) = match i {
+                Item::ClippedFill { shape, clip, color } => (Ink::Solid(*color), shape, clip),
+                Item::Hatch {
+                    shape,
+                    clip,
+                    color,
+                    stripe,
+                    period,
+                } => {
+                    assert_eq!((*stripe, *period), (3.0, 6.0));
+                    (Ink::Stripes(*color), shape, clip)
+                }
+                Item::ClippedBorder {
+                    shape,
+                    clip,
+                    width,
+                    color,
+                } => {
+                    assert_eq!(*width, 1.0);
+                    (Ink::Outline(*color), shape, clip)
+                }
+                _ => return None,
+            };
+            Some(Segment {
+                ink,
+                x: shape.rect.x,
+                w: shape.rect.w,
+                shape: *shape,
+                clip: *clip,
+            })
+        })
+        .collect()
+}
+
+const SQUARE: Radii = Radii {
+    tl: 0.0,
+    tr: 0.0,
+    br: 0.0,
+    bl: 0.0,
+};
+const ROUND_RIGHT: Radii = Radii {
+    tl: 0.0,
+    tr: 6.0,
+    br: 6.0,
+    bl: 0.0,
+};
+
+fn assert_segment(got: &Segment, ink: Ink, x: f64, w: f64, radii: Radii, track: Rect) {
+    assert_eq!(got.ink, ink, "{got:?}");
+    assert!((f64::from(got.x) - x).abs() < 1e-4, "x {} vs {x}", got.x);
+    assert!((f64::from(got.w) - w).abs() < 1e-4, "w {} vs {w}", got.w);
+    assert_eq!(
+        (got.shape.rect.y, got.shape.rect.h, got.shape.radii),
+        (track.y, 10.0, radii)
+    );
+    assert_eq!(
+        got.clip,
+        Shape {
+            rect: track,
+            radii: Radii::all(6.0)
+        }
+    );
+}
+
+const SUCCESS: &str = "#1f883d";
+const DANGER: &str = "#cf222e";
+const EMPHASIS: &str = "#818b98";
+
 #[test]
 fn the_reference_chart_has_the_css_geometry() {
     let list = list(&reference_chart());
-    assert_eq!(list.height, 439.0);
-    let bars = clipped(&list);
-    let track_tops = [92.0, 114.0, 190.0, 212.0, 288.0, 310.0, 386.0, 408.0];
-    let fills: [f64; 8] = [
-        620.0, 320.915493, 620.0, 422.429577, 610.195155, 620.0, 620.0, 620.0,
+    assert_eq!(list.height, 215.0);
+    let track = |y| Rect {
+        x: 283.0,
+        y,
+        w: 268.0,
+        h: 10.0,
+    };
+    let rows = [62.5, 104.5, 146.5, 188.5].map(track);
+    assert_eq!(tracks(&list), rows);
+    let segments = segments(&list);
+    assert_eq!(segments.len(), 9);
+    let scale = 1136.0;
+    let px = |v: f64| 268.0 * v / scale;
+    let (stripes, outline) = (hex("#1f883d73"), hex("#1f883d8c"));
+    let decrease = |at: usize, row: Rect, after: f64, before: f64| {
+        assert_segment(
+            &segments[at],
+            Ink::Solid(hex(SUCCESS)),
+            283.0,
+            px(after),
+            SQUARE,
+            row,
+        );
+        for (s, ink) in [(1, Ink::Stripes(stripes)), (2, Ink::Outline(outline))] {
+            assert_segment(
+                &segments[at + s],
+                ink,
+                283.0 + px(after),
+                px(before - after),
+                ROUND_RIGHT,
+                row,
+            );
+        }
+    };
+    decrease(0, rows[0], 588.0, 1136.0);
+    decrease(3, rows[1], 774.0, 1136.0);
+    assert_segment(
+        &segments[6],
+        Ink::Solid(hex(EMPHASIS)),
+        283.0,
+        px(292.5),
+        SQUARE,
+        rows[2],
+    );
+    assert_segment(
+        &segments[7],
+        Ink::Solid(hex(DANGER)),
+        283.0 + px(292.5),
+        px(297.2 - 292.5),
+        SQUARE,
+        rows[2],
+    );
+    assert_segment(
+        &segments[8],
+        Ink::Solid(hex(EMPHASIS)),
+        283.0,
+        px(91.0),
+        SQUARE,
+        rows[3],
+    );
+}
+
+#[test]
+fn one_scale_spans_every_row() {
+    let metrics = vec![
+        metric("Small", "ms", 50.0, 40.0, true),
+        metric("Large", "ms", 400.0, 500.0, true),
     ];
-    assert_eq!(bars.len(), 8);
-    for ((fill, track), (y, w)) in bars.iter().zip(track_tops.into_iter().zip(fills)) {
-        let want = Shape {
-            rect: Rect {
-                x: 17.0,
-                y,
-                w: 620.0,
-                h: 10.0,
-            },
-            radii: Radii::all(6.0),
-        };
-        assert_eq!(*track, want);
-        assert!(list
-            .items
-            .iter()
-            .any(|i| matches!(i, Item::Fill { shape, .. } if *shape == want)));
-        assert!(
-            (f64::from(fill.rect.w) - w).abs() < 1e-4,
-            "fill {} at {y}",
-            fill.rect.w
-        );
-        assert_eq!(
-            Shape {
-                rect: Rect {
-                    w: 620.0,
-                    ..fill.rect
-                },
-                ..*fill
-            },
-            want
-        );
+    let segments = segments(&list(&chart(None, metrics)));
+    let px = |v: f64| 268.0 * v / 500.0;
+    let widths: Vec<f64> = segments.iter().map(|s| f64::from(s.w)).collect();
+    let want = [px(40.0), px(10.0), px(10.0), px(400.0), px(100.0)];
+    assert_eq!(widths.len(), want.len());
+    for (got, want) in widths.into_iter().zip(want) {
+        assert!((got - want).abs() < 1e-4, "{got} vs {want}");
     }
 }
 
 #[test]
-fn the_change_ends_at_the_inner_right_edge_on_the_name_baseline() {
+fn a_tiny_after_keeps_half_a_percent_of_the_track() {
+    let thin = list(&chart(
+        None,
+        vec![metric("Requests", "", 1000.0, 1.0, true)],
+    ));
+    let segments = segments(&thin);
+    let track = tracks(&thin)[0];
+    assert_segment(
+        &segments[0],
+        Ink::Solid(hex(SUCCESS)),
+        283.0,
+        1.34,
+        SQUARE,
+        track,
+    );
+    assert_segment(
+        &segments[1],
+        Ink::Stripes(hex("#1f883d73")),
+        283.0 + 0.268,
+        268.0 * 0.999,
+        ROUND_RIGHT,
+        track,
+    );
+}
+
+#[test]
+fn a_decrease_where_higher_is_better_is_hatched_in_danger() {
+    let segments = segments(&list(&chart(
+        None,
+        vec![metric("Score", "", 90.0, 60.0, false)],
+    )));
+    let inks: Vec<&Ink> = segments.iter().map(|s| &s.ink).collect();
+    assert_eq!(
+        inks,
+        [
+            &Ink::Solid(hex(DANGER)),
+            &Ink::Stripes(hex("#cf222e73")),
+            &Ink::Outline(hex("#cf222e8c"))
+        ]
+    );
+}
+
+#[test]
+fn the_columns_sit_where_the_css_grid_puts_them() {
     let list = list(&reference_chart());
     let runs = glyph_runs(&list);
-    for change in ["−48 %", "−32 %", "+1.6 %", "0 %"] {
-        let x = 797.0 - unwrapped(change, 14.0, 600);
+    let rows = [
+        ("−48 %", "1,136 → ", "588 ms"),
+        ("−32 %", "1,136 → ", "774 ms"),
+        ("+1.6 %", "292.5 → ", "297.2 kB"),
+        ("0 %", "91 → ", "91"),
+    ];
+    for (change, before, after) in rows {
+        assert!(unwrapped(change, 14.0, 600) < 64.0, "{change}");
+        let change_x = 797.0 - unwrapped(change, 14.0, 600);
         let (_, baseline) = *runs
             .iter()
-            .find(|(rx, _)| (rx - x).abs() < 1e-4)
+            .find(|(x, _)| (x - change_x).abs() < 1e-3)
             .unwrap_or_else(|| panic!("no run ends {change} at 797"));
         assert!(
-            runs.iter().any(|&(rx, b)| rx == 17.0 && b == baseline),
+            runs.iter().any(|&(x, b)| x == 17.0 && b == baseline),
             "{change} is off the name baseline"
+        );
+        let values_x = 717.0 - unwrapped(before, 12.0, 400) - unwrapped(after, 12.0, 600);
+        assert!(
+            runs.iter().any(|(x, _)| (x - values_x).abs() < 1e-3),
+            "{before}{after} does not end at 717"
         );
     }
 }
 
 #[test]
 fn the_header_and_rows_take_their_css_heights() {
-    assert_eq!(list(&chart(Some(""), reference_metrics())).height, 393.0);
-    assert_eq!(list(&chart(None, reference_metrics())).height, 393.0);
+    assert_eq!(list(&chart(Some(""), reference_metrics())).height, 169.0);
+    assert_eq!(list(&chart(None, reference_metrics())).height, 169.0);
     let one = vec![reference_metrics().remove(0)];
-    assert_eq!(list(&chart(Some("Performance"), one)).height, 145.0);
+    assert_eq!(list(&chart(Some("Performance"), one)).height, 89.0);
 
     let title = "Render times and bundle sizes before and after the change across every page of the site that we measured in the lab";
     assert_eq!(
         measure(title, 14.0, 600, WhiteSpace::Normal, WIDTH - 34.0).len(),
         2
     );
-    assert_eq!(list(&chart(Some(title), reference_metrics())).height, 460.0);
+    assert_eq!(list(&chart(Some(title), reference_metrics())).height, 236.0);
+}
 
-    let room = WIDTH - 50.0 - unwrapped("−48 %", 14.0, 600);
-    let lines = |name: &str| measure(name, 14.0, 600, WhiteSpace::Normal, room).len();
-    let mut name = "First Contentful Paint measured on the slowest page of the whole site with a cold cache and x".to_string();
-    while lines(&name) == 1 {
-        name.push('x');
-    }
-    assert_eq!(lines(&name), 2);
-    assert!(unwrapped(&name, 14.0, 600) < room + 16.0);
+#[test]
+fn a_wrapped_name_grows_its_row_and_centers_the_other_cells() {
+    let two = "First Contentful Paint on a cold cache";
+    let three = "First Contentful Paint on the slowest page of the site with a cold cache";
+    assert_eq!((name_lines(two), name_lines(three)), (2, 3));
     let mut metrics = reference_metrics();
-    metrics[0].name = name;
-    assert_eq!(list(&chart(Some("Performance"), metrics)).height, 460.0);
+    metrics[0].name = two.to_string();
+    metrics[2].name = three.to_string();
+    let rendered = draw(&chart(Some("Performance"), metrics), W).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(rendered.list.height, 215.0 + 21.0 + 42.0);
+    assert_eq!(
+        tracks(&rendered.list)
+            .iter()
+            .map(|r| r.y)
+            .collect::<Vec<_>>(),
+        [73.0, 125.5, 188.5, 251.5]
+    );
+    assert_eq!(
+        rendered.wrapped,
+        [
+            WrappedName { index: 0, lines: 2 },
+            WrappedName { index: 2, lines: 3 }
+        ]
+    );
+    let runs = glyph_runs(&rendered.list);
+    let first_name_baseline = runs
+        .iter()
+        .filter(|&&(x, b)| x == 17.0 && b > 47.0)
+        .map(|&(_, b)| b)
+        .fold(f32::INFINITY, f32::min);
+    let change_x = 797.0 - unwrapped("−48 %", 14.0, 600);
+    let (_, change_baseline) = *runs
+        .iter()
+        .find(|(x, _)| (x - change_x).abs() < 1e-3)
+        .expect("the change run");
+    assert_eq!(change_baseline - first_name_baseline, 10.5);
+    let values_baseline = |before: &str, after: &str, top: f32| {
+        let x = 717.0 - unwrapped(before, 12.0, 400) - unwrapped(after, 12.0, 600);
+        runs.iter()
+            .find(|&&(rx, b)| (rx - x).abs() < 1e-3 && b > top && b < top + 60.0)
+            .map(|&(_, b)| b - top)
+            .unwrap_or_else(|| panic!("no value run for {after} below {top}"))
+    };
+    assert_eq!(
+        values_baseline("1,136 → ", "588 ms", 47.0) - values_baseline("1,136 → ", "774 ms", 110.0),
+        10.5
+    );
+}
+
+#[test]
+fn names_on_one_line_are_not_reported() {
+    assert_eq!(
+        draw(&reference_chart(), W).map(|r| r.wrapped),
+        Ok(Vec::new())
+    );
 }
 
 #[test]
@@ -330,9 +560,10 @@ fn invalid_metrics_are_rejected_with_their_index() {
 
 #[test]
 fn text_that_cannot_fit_is_rejected() {
-    let long = "x".repeat(200);
+    let word = "x".repeat(40);
+    assert!(unwrapped(&word, 14.0, 600) > 250.0);
     let mut metrics = reference_metrics();
-    metrics[2].name = format!("Bundle {long}");
+    metrics[2].name = format!("Bundle {word}");
     assert_eq!(
         draw(&chart(None, metrics), W),
         Err(ChartError::Metric {
@@ -340,6 +571,7 @@ fn text_that_cannot_fit_is_rejected() {
             error: MetricError::NameTooWide
         })
     );
+    let long = "x".repeat(200);
     assert_eq!(
         draw(&chart(Some(&long), reference_metrics()), W),
         Err(ChartError::TitleTooWide)
@@ -347,70 +579,96 @@ fn text_that_cannot_fit_is_rejected() {
 }
 
 #[test]
-fn the_width_lies_between_310_and_4096_px() {
-    for width in [309, 4097] {
+fn the_width_lies_between_646_and_4096_px() {
+    for width in [645, 4097] {
         assert_eq!(
             draw(&reference_chart(), width),
             Err(ChartError::Width { width })
         );
     }
-    for width in [310, 4096] {
+    for width in [646, 4096] {
         assert_eq!(
-            draw(&reference_chart(), width).map(|l| l.width),
+            draw(&reference_chart(), width).map(|r| r.list.width),
             Ok(width as f32)
         );
     }
+    let narrow = draw(&reference_chart(), 646).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(tracks(&narrow.list)[0].w, 100.0);
+}
+
+#[test]
+fn the_widest_change_sets_the_change_column() {
+    let mut metrics = reference_metrics();
+    metrics.push(metric("Requests", "", 1.0, 1e6, true));
+    let wide = unwrapped("+99999900 %", 14.0, 600);
+    assert!(wide > 64.0, "{wide}");
+    let list = list(&chart(None, metrics.clone()));
+    let track = 814.0 - 34.0 - 250.0 - 150.0 - 48.0 - wide;
+    assert!((tracks(&list)[0].w - track).abs() < 1e-3);
+    let runs = glyph_runs(&list);
+    let values_end = 797.0 - wide - 16.0;
+    let values_x = values_end - unwrapped("1,136 → ", 12.0, 400) - unwrapped("588 ms", 12.0, 600);
+    assert!(runs.iter().any(|(x, _)| (x - values_x).abs() < 1e-3));
+    assert_eq!(
+        draw(&chart(None, metrics), 646),
+        Err(ChartError::Metric {
+            index: 4,
+            error: MetricError::ChangeTooWide
+        })
+    );
 }
 
 #[test]
 fn a_chart_beyond_the_dpr_2_limits_is_rejected_before_rasterizing() {
     let row = reference_metrics().remove(0);
     let tall = |rows: usize| chart(None, vec![row.clone(); rows]);
-    let height = |rows: usize| 98 * rows as u64 + 1;
+    let height = |rows: usize| 42 * rows as u64 + 1;
     assert_eq!(
-        draw(&tall(167), W).map(|l| l.height),
-        Ok(height(167) as f32)
+        draw(&tall(390), W).map(|r| r.list.height),
+        Ok(height(390) as f32)
     );
     assert_eq!(
-        draw(&tall(168), W),
+        draw(&tall(391), W),
         Err(ChartError::Size(LimitError::Height {
-            px: 2 * height(168),
+            px: 2 * height(391),
             max: 32_768
         }))
     );
-    assert!(draw(&tall(39), 4096).is_ok());
+    assert!(draw(&tall(92), 4096).is_ok());
     assert_eq!(
-        draw(&tall(40), 4096),
+        draw(&tall(93), 4096),
         Err(ChartError::Size(LimitError::Pixels {
-            pixels: 8_192 * 2 * height(40),
+            pixels: 8_192 * 2 * height(93),
             max: 64_000_000
         }))
     );
 }
 
-fn unit_at(width: f32) -> String {
-    let (before_key, after_key) = (
-        unwrapped("Before", 12.0, 400),
-        unwrapped("After", 12.0, 400),
-    );
-    let column = |unit: &str| {
-        let before = before_key + unwrapped(&format!("1 {unit}"), 12.0, 400);
-        let after = after_key + unwrapped(&format!("7 {unit}"), 12.0, 600);
-        before.max(after)
-    };
+fn values_at(width: f32) -> (f64, String) {
+    let befores = [
+        (1.0, "1 → "),
+        (1.5, "1.5 → "),
+        (1000.0, "1,000 → "),
+        (-1.0, "−1 → "),
+        (1.25, "1.25 → "),
+        (-1.5, "−1.5 → "),
+    ]
+    .map(|(value, text)| (value, unwrapped(text, 12.0, 400)));
+    let after = |unit: &str| unwrapped(&format!("7 {unit}"), 12.0, 600);
     let letters: Vec<char> = ('a'..='z').collect();
     for len in 0..30 {
         let stem = "m".repeat(len);
-        let widest = column(&format!("{stem}mmm")).max(column(&format!("{stem}www")));
-        if widest < width - 1.0 {
+        let widest = after(&format!("{stem}mmm")).max(after(&format!("{stem}www")));
+        if widest + befores.iter().map(|b| b.1).fold(0.0, f32::max) < width - 1.0 {
             continue;
         }
         for a in &letters {
             for b in &letters {
                 for c in &letters {
                     let unit = format!("{stem}{a}{b}{c}");
-                    if column(&unit) == width {
-                        return unit;
+                    let w = after(&unit);
+                    if let Some(&(before, _)) = befores.iter().find(|b| b.1 + w == width) {
+                        return (before, unit);
                     }
                 }
             }
@@ -420,16 +678,25 @@ fn unit_at(width: f32) -> String {
 }
 
 #[test]
-fn the_value_column_holds_exactly_144_px() {
-    let draw_unit = |unit: &str| draw(&chart(None, vec![metric("Size", unit, 1.0, 7.0, true)]), W);
+fn the_value_column_holds_exactly_150_px() {
+    let draw_unit = |before: f64, unit: &str| {
+        draw(
+            &chart(None, vec![metric("Size", unit, before, 7.0, true)]),
+            W,
+        )
+    };
     let padded = |unit: &str| format!(" \t{unit}\n ");
-    let fits = unit_at(144.0);
-    assert!(draw_unit(&fits).is_ok(), "{fits}");
-    assert_eq!(draw_unit(&padded(&fits)), draw_unit(&fits), "{fits}");
-    let over = unit_at(144.0 + 1.0 / 64.0);
+    let (before, fits) = values_at(150.0);
+    assert!(draw_unit(before, &fits).is_ok(), "{before} {fits}");
+    assert_eq!(
+        draw_unit(before, &padded(&fits)),
+        draw_unit(before, &fits),
+        "{fits}"
+    );
+    let (before, over) = values_at(150.0 + 1.0 / 64.0);
     for unit in [over.clone(), padded(&over)] {
         assert_eq!(
-            draw_unit(&unit),
+            draw_unit(before, &unit),
             Err(ChartError::Metric {
                 index: 0,
                 error: MetricError::ValueTooWide
@@ -441,7 +708,9 @@ fn the_value_column_holds_exactly_144_px() {
 
 fn raster(chart: &Chart, theme: Theme) -> Pixmap {
     let fonts = fonts();
-    let list = render(&fonts, chart, theme, W).unwrap_or_else(|e| panic!("{e}"));
+    let list = render(&fonts, chart, theme, W)
+        .unwrap_or_else(|e| panic!("{e}"))
+        .list;
     rasterize(&fonts, &list, 2.0, &Default::default()).expect("rasterize")
 }
 
@@ -469,22 +738,60 @@ fn outside_rounded_rect(x: f32, y: f32, r: Rect, radius: f32) -> f32 {
 }
 
 #[test]
-fn a_thin_fill_stays_inside_the_rounded_track() {
+fn the_removed_part_has_135_degree_stripes_inside_an_outline() {
+    let pm = raster(&reference_chart(), Theme::Light);
+    let track = over(hex("#818b981f"), hex("#ffffff"));
+    let stripe = over(hex("#1f883d73"), track);
+    let left = 2.0 * (283.0 + 268.0 * 588.0 / 1136.0);
+    let (mut stripes, mut gaps) = (0, 0);
+    for y in 127..143u32 {
+        for x in 846..1080u32 {
+            let along = ((f64::from(x) + 0.5 - left) + (f64::from(y) + 0.5 - 125.0)) / 2.0
+                * std::f64::consts::FRAC_1_SQRT_2;
+            let phase = along.rem_euclid(6.0);
+            if [0.0, 3.0, 6.0]
+                .iter()
+                .any(|edge| (phase - edge).abs() < 0.01)
+            {
+                continue;
+            }
+            let (want, count) = if phase < 3.0 {
+                (stripe, &mut stripes)
+            } else {
+                (track, &mut gaps)
+            };
+            let p = pm.pixel(x, y).expect("pixel");
+            assert!(near(p, want, 1), "{x},{y} at {phase}: {p:?} vs {want:?}");
+            *count += 1;
+        }
+    }
+    assert!(stripes > 1500 && gaps > 1500, "{stripes} {gaps}");
+    let outline = hex("#1f883d8c");
+    for x in 846..1080u32 {
+        let p = pm.pixel(x, 125).expect("pixel");
+        let options = [over(outline, track), over(outline, stripe)];
+        assert!(
+            options.iter().any(|&o| near(p, o, 1)),
+            "{x},125: {p:?} vs {options:?}"
+        );
+    }
+    assert_eq!(pm.pixel(1101, 144), Some(hex("#ffffff")));
+}
+
+#[test]
+fn a_thin_fill_and_its_stripes_stay_inside_the_rounded_track() {
     let thin = chart(None, vec![metric("Requests", "", 1000.0, 1.0, true)]);
-    let after = clipped(&list(&thin))[1].0;
-    assert!((after.rect.w - 3.1).abs() < 1e-4, "{}", after.rect.w);
     let pm = raster(&thin, Theme::Light);
     let bg = hex("#ffffff");
-    let fill = hex("#1f883d");
     let track = Rect {
-        x: 34.0,
-        y: 136.0,
-        w: 1240.0,
+        x: 566.0,
+        y: 33.0,
+        w: 536.0,
         h: 20.0,
     };
     let mut checked = 0;
-    for y in 124..168 {
-        for x in 20..80 {
+    for y in 22..64 {
+        for x in (556..600).chain(1060..1112) {
             let (cx, cy) = (x as f32 + 0.5, y as f32 + 0.5);
             if outside_rounded_rect(cx, cy, track, 10.0) > 0.75 {
                 let p = pm.pixel(x, y).expect("pixel");
@@ -494,36 +801,19 @@ fn a_thin_fill_stays_inside_the_rounded_track() {
         }
     }
     assert!(checked > 1000, "{checked}");
-    assert!(near(pm.pixel(37, 146).expect("pixel"), fill, 2));
+    assert_ne!(pm.pixel(566, 43), Some(bg));
 }
 
 #[test]
-fn a_half_fill_has_a_rounded_right_end() {
-    let pm = raster(
-        &chart(None, vec![metric("Requests", "", 100.0, 50.0, true)]),
-        Theme::Light,
-    );
-    let track = over(hex("#818b981f"), hex("#ffffff"));
-    let corner = pm.pixel(653, 136).expect("pixel");
-    assert!(near(corner, track, 2), "{corner:?} vs track {track:?}");
-    assert!(near(pm.pixel(650, 146).expect("pixel"), hex("#1f883d"), 2));
-}
-
-#[test]
-fn after_fills_take_the_tone_color() {
-    let centers = [
-        (17.0 + 320.915493 / 2.0, 119.0),
-        (17.0 + 422.429577 / 2.0, 217.0),
-        (327.0, 315.0),
-        (327.0, 413.0),
-    ];
+fn segments_take_the_tone_colors() {
+    let points = [(700, 135), (635, 303), (705, 303), (580, 387)];
     for (theme, colors) in [
-        (Theme::Light, ["#1f883d", "#1f883d", "#cf222e", "#818b98"]),
-        (Theme::Dark, ["#238636", "#238636", "#da3633", "#656c76"]),
+        (Theme::Light, [SUCCESS, EMPHASIS, DANGER, EMPHASIS]),
+        (Theme::Dark, ["#238636", "#656c76", "#da3633", "#656c76"]),
     ] {
         let pm = raster(&reference_chart(), theme);
-        for ((x, y), color) in centers.into_iter().zip(colors) {
-            let p = pm.pixel((x * 2.0) as u32, (y * 2.0) as u32).expect("pixel");
+        for ((x, y), color) in points.into_iter().zip(colors) {
+            let p = pm.pixel(x, y).expect("pixel");
             assert!(
                 near(p, hex(color), 1),
                 "{theme:?} at {x},{y}: {p:?} vs {color}"

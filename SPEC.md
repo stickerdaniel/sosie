@@ -61,6 +61,8 @@ This file states what the core guarantees, how each guarantee is checked, and th
 - Emoji: the 109 ppem CBDT strike, one 2 by 2 box mip level per halving, then bilinear sampling.
 - Blending: `(s*a + d*(255 - a) + 127) / 255` per channel. The page background must be opaque.
 - Clipped fills: the fill's mask and the clip's mask cover the fill's device bounds, and each pixel takes `(a*b + 127) / 255` of both.
+- Clipped borders: the border ring's mask, even-odd, times the clip's mask, as for clipped fills.
+- Hatches: a clipped fill that paints only the 135° stripes of a CSS `repeating-linear-gradient(135deg, color 0 stripe, transparent stripe period)`. A device pixel paints when `((x + 0.5 - x0) + (y + 0.5 - y0)) / dpr * √2/2` modulo `period` is below `stripe`, with (x0, y0) the shape's device top-left corner. Stripe edges get no antialiasing, as in Chromium.
 - Inline code backgrounds: device rows from `ceil(base - ascent - padding)` to `floor(base + descent + padding)`, horizontal edges rounded.
 
 ## Limits
@@ -69,17 +71,22 @@ This file states what the core guarantees, how each guarantee is checked, and th
 
 ## Chart
 
-`chart::render` draws GitHub-style metric bars from a `Chart` at a whole CSS width W. The reference uses W = 814 px. It ports the HTML template of `metric-bars.ts` in agent-setup `shared/skills/pr-media`. Colors are the 12 `@primer/primitives` 11.10.0 tokens in `assets/primer-tokens.json`; `node tools/primer-tokens.mjs` refreshes the file from npm, and a test compares it with `Palette::LIGHT` and `Palette::DARK`. Text uses the primer system font stack, which resolves to Noto Sans.
+`chart::render` draws one bar per metric from a `Chart` at a whole CSS width W and returns the display list with the indices and line counts of wrapped names. The reference uses W = 814 px. Colors are the 12 `@primer/primitives` 11.10.0 tokens in `assets/primer-tokens.json`; `node tools/primer-tokens.mjs` refreshes the file from npm, and a test compares it with `Palette::LIGHT` and `Palette::DARK`. Text uses the primer system font stack, which resolves to Noto Sans. Noto Sans has no U+2192, so the arrow falls back to Noto Sans CJK when that pack is loaded and to Liberation Mono otherwise, as in `sosie chart`.
 
 - Box: a 1 px `borderColor-default` border with radius 6, on `bgColor-default`. Content starts 17 px inside each side.
 - Header, only for a non-empty title: 12 px padding above and below, 14/21 px text at weight 600 wrapped at W - 34, a `bgColor-muted` background with top radii 5, and a 1 px `borderColor-default` bottom border.
-- Row: 12 px padding above, 14 px below, and a 1 px `borderColor-muted` top border on every row after the first. The name, 14/21 px at weight 600, wraps at W - 50 minus the change's advance. The change, 14/21 px at weight 600 in the tone color, does not wrap, ends at W - 17 and shares the name's first baseline.
-- Bars: a before bar and an after bar, 22 px each, 6 px below the name. The track is 10 px high, W - 194 px wide, with radius 6, which CSS fits to 5. The fill takes max(|v| / max(|before|, |after|), 0.5 %) of the track, its own radius 6 fits to min(5, width / 2), and the track's rounded rect clips it. Before fills are `borderColor-emphasis`, after fills follow the tone.
-- Value column: 144 px from W - 161, with the key `Before` or `After` on the left and the value on the right, 12/18 px, centered in the bar.
-- Height: 1 + header + rows + separators + 1. The reference input of four metrics with a title is 814 by 439 CSS px.
+- Row: one per metric, 10 px padding above and below, and a 1 px `borderColor-muted` top border on every row after the first. Four columns with 16 px gaps: name 250 px, track, value 150 px and change. Each cell is centered vertically in the row's content height, the tallest of its cells.
+- Name: 14/21 px at weight 600 in `fgColor-default`, wrapped at 250 px. A wrapped name makes its row taller, and `render` reports it.
+- Track: 10 px high, radius 6, which CSS fits to 5, in `bgColor-neutral-muted`, W - 482 px minus the change column wide. One scale spans the chart: the largest |before| or |after| of all metrics. Segments are rectangles clipped by the track's rounded rect.
+- Decrease, |after| < |before|: a solid tone fill from 0 to max(|after|, 0.5 % of the track), then the removed part from |after| to |before|: a hatch of 3 px tone fill at 45 % alpha and 3 px clear, a 1 px inset outline of the tone fill at 55 % alpha, and right radii 6. Increase: a solid `borderColor-emphasis` segment from 0 to |before|, then a solid tone fill from |before| to |after|. Equal magnitudes: one tone fill from 0 to max(|before|, 0.5 % of the track). The tone fill is `bgColor-success-emphasis`, `bgColor-danger-emphasis` or, at 0 %, `borderColor-emphasis`.
+- Value: 12/18 px, right-aligned in 150 px: `format_value(before, "")` and U+2192 in `fgColor-muted` at weight 400, then `format_value(after, unit)` in `fgColor-default` at weight 600.
+- Change: 14/21 px at weight 600 in the tone's text color, right-aligned and ending at W - 17. The column is as wide as the widest change of the chart and at least 64 px.
+- Width: W from 646 to 4096 CSS px. 646 = 34 + 250 + 150 + 64 + 3 × 16 + 100 leaves a 100 px track beside a 64 px change column.
+- Height: 1 + header + rows + separators + 1, with each row 20 + its content height. A one-line row is 41 px. The reference input of four metrics with a title is 814 by 215 CSS px.
 - Formatting: `format_value` matches `Intl.NumberFormat('en-US', { maximumFractionDigits: 2 })` with U+2212 as minus. It rounds the decimal that JS `Number.prototype.toString` picks: the shortest round-trip digit count, and of those the decimal nearest the binary value, ties to even. The value text collapses whitespace runs to one space and trims both ends, as `white-space: nowrap`, and stays on one line. `percent_change` rounds the exact binary value to 0 digits at 10 % or more and to 1 digit below, ties away from zero, as `toFixed`. `tests/chart-format.json`, generated by Bun from the JS functions, pins both.
 - Tone: neutral at 0 %, success when the sign of the change matches `lower_is_better`, danger otherwise.
-- Errors: no metrics, an empty name, a non-finite value, before 0, a change that is not finite or reaches 1e21 (JS would switch to exponent notation), W outside 310 to 4096 CSS px, a dpr 2 surface beyond `Limits::default()`, a title or name line wider than its width plus the line breaker's 1/64 px tolerance, and key plus value wider than 144 px. A metric error carries the metric index.
+- Errors: no metrics, an empty name, a non-finite value, before 0, a change that is not finite or reaches 1e21 (JS would switch to exponent notation), W outside 646 to 4096 CSS px, a dpr 2 surface beyond `Limits::default()`, a title or name line wider than its width plus the line breaker's 1/64 px tolerance, a value wider than 150 px, and a change column that leaves the track below 100 px. A metric error carries the metric index.
+- Warning: `sosie chart` prints one stderr line per wrapped name, still writes both files and exits 0.
 - The Chromium gates do not cover charts. Tests check the geometry against numbers derived from the CSS.
 
 ## Goldens

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/sosie-core"]
+members = ["crates/sosie-core", "crates/sosie-cli"]
 
 [workspace.package]
 version = "0.0.0"

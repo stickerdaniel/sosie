@@ -3707,3 +3707,88 @@ fn a_trailing_space_before_a_carriage_return_takes_its_span_end_padding() {
         pre(24.015625, 48.0, 5.984375),
     ]);
 }
+
+#[test]
+fn a_space_skipped_at_an_overflowing_line_end_keeps_its_span_padding() {
+    use WhiteSpace::{Normal as N, Pre as P};
+    let first_x = |overflow_wrap, tail: &str, pad: f32| {
+        let p = Paragraph {
+            width: 6.25,
+            strut: TextStyle {
+                family: FamilyList::parse(MONO),
+                size: 10.0,
+                line_height: 16.0,
+                tab_size: 1,
+                ..style(MONO, P)
+            },
+            overflow_wrap,
+            direction: Direction::Rtl,
+            dpr: 1.0,
+        };
+        let inlines = [
+            padded(P, "a", 10.0, 16.0, None),
+            padded(N, "a ", 10.0, 16.0, Some(pad)),
+            padded(P, tail, 10.0, 16.0, None),
+        ];
+        let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+        let mut list = DisplayList::new(100.0, 100.0, hex("#ffffff"));
+        t.paint(&mut list, 0.0, 0.0);
+        list.items
+            .iter()
+            .flat_map(|i| match i {
+                Item::Glyphs { x, glyphs, .. } => glyphs.iter().map(|g| x + g.x).collect(),
+                _ => Vec::new(),
+            })
+            .fold(f32::INFINITY, f32::min)
+    };
+    use OverflowWrap::{Anywhere as A, Normal as O};
+    for (overflow_wrap, tail, pad, chromium) in [
+        (A, "\r\n", 0.5, -6.78125),
+        (O, "\r\n", 0.5, -6.28125),
+        (A, "\n", 0.5, -6.78125),
+        (A, "\r", 0.5, -6.78125),
+        (A, "\r\n", 3.0, -11.78125),
+    ] {
+        let x = first_x(overflow_wrap, tail, pad);
+        assert!(
+            (x - chromium).abs() < 0.02,
+            "{overflow_wrap:?} {tail:?} padding {pad}: first a at {x}, Chromium {chromium}"
+        );
+    }
+}
+
+#[test]
+fn a_space_skipped_alone_in_its_span_keeps_the_padding_off_the_text_before() {
+    use WhiteSpace::{Normal as N, Pre as P, PreWrap};
+    let p = Paragraph {
+        width: 1.25,
+        strut: TextStyle {
+            family: FamilyList::parse(MONO),
+            size: 10.0,
+            line_height: 16.0,
+            tab_size: 1,
+            ..style(MONO, PreWrap)
+        },
+        overflow_wrap: OverflowWrap::Anywhere,
+        direction: Direction::Rtl,
+        dpr: 1.0,
+    };
+    let inlines = [
+        padded(P, "b", 10.0, 16.0, None),
+        padded(N, " \r ", 6.0, 48.0, Some(6.53125)),
+        padded(P, "\r", 6.0, 24.0, None),
+        padded(N, "c", 6.0, 24.0, None),
+    ];
+    let t = layout(shared_fonts(), &p, &inlines).unwrap_or_else(|e| panic!("{e}"));
+    let mut list = DisplayList::new(100.0, 100.0, hex("#ffffff"));
+    t.paint(&mut list, 0.0, 0.0);
+    let b = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            Item::Glyphs { x, glyphs, .. } => glyphs.first().map(|g| x + g.x),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no glyphs"));
+    assert!((b - -4.765625).abs() < 0.02, "b at {b}, Chromium -4.765625");
+}

@@ -1008,8 +1008,10 @@ impl<'a> Para<'a> {
         let t = self.trail(ls, le);
         let skip = b.skip.filter(|&k| k < t);
         let (mut adv, mut trims) = self.shape_range(ls, t);
-        if let Some(k) = skip {
-            adv[k - ls] = 0.0;
+        for k in skip.into_iter().chain(b.collapsed.iter().copied()) {
+            if (ls..t).contains(&k) {
+                adv[k - ls] = 0.0;
+            }
         }
         let (full, mut pos) = self.walk(ls, t, &adv);
         let hang_pad: f32 = (t..le)
@@ -1023,10 +1025,11 @@ impl<'a> Para<'a> {
         let full = full + hang_pad;
         let normal = |k: usize| self.styles[self.g[k].span].ws == WhiteSpace::Normal;
         let base = u8::from(self.rtl_base);
-        let own = |k: usize| normal(k) && self.g[k].span == self.g[t - 1].span;
+        let kept = |k: usize| {
+            normal(k) && self.g[k].span == self.g[t - 1].span && !b.collapsed.contains(&k)
+        };
         let hang_run = hang_pad > 0.0
-            && ((t..le).any(|k| !normal(k))
-                && (t..le).any(|k| own(k) && !b.collapsed.contains(&k))
+            && ((t..le).any(|k| !normal(k)) && (t..le).any(kept)
                 || self.g[t - 1].level != base
                     && ((t..le).any(|k| self.g[k].cr)
                         || b.forced
@@ -1034,7 +1037,7 @@ impl<'a> Para<'a> {
                                 g.nl && self.text[g.start..g.end].starts_with('\r')
                             }))
                     && (t..le)
-                        .any(|k| own(k) && self.g[k].pad_after > 0.0 && self.g[k].level == base));
+                        .any(|k| kept(k) && self.g[k].pad_after > 0.0 && self.g[k].level == base));
         let soft = le < self.g.len() && !self.g[le].nl;
         let trim = if (self.wrap || soft) && full > self.avail && t > ls {
             self.end_trim(t)
@@ -1044,7 +1047,7 @@ impl<'a> Para<'a> {
         if let Some(p) = pos.last_mut() {
             p.1 -= trim;
         }
-        let vpos = self.visual(ls, t, le, (hang_pad, hang_run), skip, &pos);
+        let vpos = self.visual(ls, t, le, (hang_pad, hang_run), (skip, &b.collapsed), &pos);
         let ink: Vec<usize> = (ls..t)
             .filter(|&k| !self.g[k].space && !self.g[k].tab && !self.g[k].cr)
             .collect();
@@ -1227,7 +1230,7 @@ impl<'a> Para<'a> {
         t: usize,
         le: usize,
         (hang_pad, hang_run): (f32, bool),
-        skip: Option<usize>,
+        (skip, collapsed): (Option<usize>, &[usize]),
         pos: &[(f32, f32)],
     ) -> Vec<(f32, f32)> {
         if !self.rtl_base && (ls..t).all(|k| self.g[k].level.is_multiple_of(2)) {
@@ -1260,6 +1263,15 @@ impl<'a> Para<'a> {
                 for j in (0..gi).rev().take_while(|&j| self.g[groups[j].0].cr) {
                     levels[j] = next;
                 }
+            }
+        }
+        for gi in 1..groups.len() {
+            let (a, b) = groups[gi];
+            if b == a + 1
+                && collapsed.contains(&a)
+                && self.g[groups[gi - 1].0].span == self.g[a].span
+            {
+                levels[gi] = levels[gi - 1];
             }
         }
         let hang = if hang_run {
